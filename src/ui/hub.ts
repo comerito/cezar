@@ -27,7 +27,7 @@ export async function launchHub(store: IssueStore | null, config: Config): Promi
 
   // selected is an action id — look it up and run it
   if (!store) {
-    console.error(chalk.red("Store not found. Run 'issue-manager init' first."));
+    console.error(chalk.red("Store not found. Run 'cezar init' first."));
     return;
   }
 

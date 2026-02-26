@@ -2,7 +2,7 @@ import type { IssueStore } from '../store/store.js';
 import type { Config } from '../models/config.model.js';
 
 export interface ActionDefinition {
-  /** Unique machine identifier. Used as CLI argument: `issue-manager run duplicates` */
+  /** Unique machine identifier. Used as CLI argument: `cezar run duplicates` */
   id: string;
 
   /** Display name shown in the interactive menu */

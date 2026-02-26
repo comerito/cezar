@@ -36,9 +36,9 @@ node dist/index.js run unknown     # "Store not found" (exit 1)
 ```bash
 export GITHUB_TOKEN=<token>
 export ANTHROPIC_API_KEY=<key>
-issue-manager init -o <owner> -r <repo>
-issue-manager status
-issue-manager sync
-issue-manager run duplicates --dry-run
-issue-manager   # launches interactive hub
+cezar init -o <owner> -r <repo>
+cezar status
+cezar sync
+cezar run duplicates --dry-run
+cezar   # launches interactive hub
 ```

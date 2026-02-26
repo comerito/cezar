@@ -87,7 +87,7 @@ export class GitHubService {
           repo: this.repo,
           name: label,
           color: 'e4e669',
-          description: 'Duplicate issue detected by issue-manager',
+          description: 'Duplicate issue detected by cezar',
         });
       }
 

@@ -5,7 +5,7 @@ import { IssueStore } from '../store/store.js';
 export async function statusCommand(config: Config): Promise<void> {
   const store = await IssueStore.loadOrNull(config.store.path);
   if (!store) {
-    console.error(chalk.red("Store not found. Run 'issue-manager init' first."));
+    console.error(chalk.red("Store not found. Run 'cezar init' first."));
     process.exit(1);
   }
 
@@ -21,7 +21,7 @@ export async function statusCommand(config: Config): Promise<void> {
     : 'never';
 
   console.log('');
-  console.log(chalk.bold(`  Issue Manager — ${meta.owner}/${meta.repo}`));
+  console.log(chalk.bold(`  Cezar — ${meta.owner}/${meta.repo}`));
   console.log('');
   console.log(`  ${openIssues.length} open · ${closedIssues.length} closed · synced ${syncAgo}`);
   console.log(`  Digested: ${digested.length}/${allIssues.length} · Unanalyzed: ${unanalyzed.length}`);

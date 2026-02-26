@@ -5,8 +5,8 @@ import type { IssueStore } from '../store/store.js';
 export function renderStatusBox(store: IssueStore | null): void {
   if (!store) {
     const box = boxen(
-      chalk.yellow('No store found. Run `issue-manager init` to get started.'),
-      { padding: 1, borderColor: 'yellow', title: 'Issue Manager', titleAlignment: 'left' },
+      chalk.yellow('No store found. Run `cezar init` to get started.'),
+      { padding: 1, borderColor: 'yellow', title: 'Cezar', titleAlignment: 'left' },
     );
     console.log(box);
     return;
@@ -36,7 +36,7 @@ export function renderStatusBox(store: IssueStore | null): void {
   const box = boxen(lines.join('\n'), {
     padding: 1,
     borderColor: 'cyan',
-    title: '🗂  Issue Manager',
+    title: '🗂  Cezar',
     titleAlignment: 'left',
   });
 

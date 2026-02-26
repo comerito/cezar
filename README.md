@@ -4,7 +4,7 @@
 
 ```
 ┌──────────────────────────────────────────────────┐
-│  🗂  Issue Manager   your-org/your-repo           │
+│  🗂  Cezar   your-org/your-repo                    │
 │  143 open · 45 closed · synced 2 hours ago        │
 │  Digested: 143/143 · Duplicates: last run 1d ago  │
 └──────────────────────────────────────────────────┘
@@ -49,20 +49,20 @@ export GITHUB_TOKEN=ghp_...
 export ANTHROPIC_API_KEY=sk-ant-...
 
 # Initialize — fetches all issues and generates AI digests
-issue-manager init -o your-org -r your-repo
+cezar init -o your-org -r your-repo
 
 # Launch the interactive hub
-issue-manager
+cezar
 ```
 
 ## Commands
 
-### `issue-manager init`
+### `cezar init`
 
 Fetches all issues from a GitHub repo, stores them locally, and generates AI digests for each.
 
 ```bash
-issue-manager init -o <owner> -r <repo> [options]
+cezar init -o <owner> -r <repo> [options]
 ```
 
 | Flag | Description |
@@ -74,12 +74,12 @@ issue-manager init -o <owner> -r <repo> [options]
 | `--no-digest` | Skip AI digest generation |
 | `--force` | Reinitialize even if a store already exists |
 
-### `issue-manager sync`
+### `cezar sync`
 
 Pulls new and updated issues since the last sync. Only re-digests issues whose content changed.
 
 ```bash
-issue-manager sync [options]
+cezar sync [options]
 ```
 
 | Flag | Description |
@@ -87,16 +87,16 @@ issue-manager sync [options]
 | `-t, --token` | GitHub token override |
 | `--include-closed` | Include closed issues |
 
-### `issue-manager status`
+### `cezar status`
 
 Prints a summary of the local store — issue counts, digest coverage, analysis state.
 
-### `issue-manager run <action>`
+### `cezar run <action>`
 
 Runs an analysis action in non-interactive mode. Currently available: `duplicates`.
 
 ```bash
-issue-manager run duplicates [options]
+cezar run duplicates [options]
 ```
 
 | Flag | Description |
@@ -108,7 +108,7 @@ issue-manager run duplicates [options]
 | `--format <fmt>` | Output as `table`, `json`, or `markdown` |
 | `--no-interactive` | Skip all prompts (CI mode) |
 
-### `issue-manager` (no arguments)
+### `cezar` (no arguments)
 
 Launches the interactive hub — a menu-driven interface with dynamic badges showing pending work.
 
@@ -183,8 +183,8 @@ Every command works without a TTY:
 
 ```bash
 # In a GitHub Actions workflow
-issue-manager sync
-issue-manager run duplicates --apply --no-interactive --format json > duplicates.json
+cezar sync
+cezar run duplicates --apply --no-interactive --format json > duplicates.json
 ```
 
 ## Project Structure

@@ -13,7 +13,7 @@ import { IssueStore } from './store/store.js';
 import './actions/duplicates/index.js';
 
 const program = new Command()
-  .name('issue-manager')
+  .name('cezar')
   .description('AI-powered GitHub issue management')
   .version('0.1.0');
 

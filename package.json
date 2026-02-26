@@ -1,9 +1,9 @@
 {
-  "name": "github-issue-manager",
+  "name": "cezar",
   "version": "0.1.0",
   "type": "module",
   "bin": {
-    "issue-manager": "./dist/index.js"
+    "cezar": "./dist/index.js"
   },
   "scripts": {
     "build": "tsc && chmod +x dist/index.js",

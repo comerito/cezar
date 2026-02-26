@@ -109,5 +109,5 @@ export async function initCommand(opts: InitOptions, config: Config): Promise<vo
   }
 
   console.log(chalk.green(`\nStore initialized at ${config.store.path}/store.json`));
-  console.log(chalk.dim("Next: run 'issue-manager' to open the action menu"));
+  console.log(chalk.dim("Next: run 'cezar' to open the action menu"));
 }

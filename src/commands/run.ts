@@ -15,7 +15,7 @@ interface RunOptions {
 export async function runCommand(actionId: string, opts: RunOptions, config: Config): Promise<void> {
   const store = await IssueStore.loadOrNull(config.store.path);
   if (!store) {
-    console.error(chalk.red("Store not found. Run 'issue-manager init' first."));
+    console.error(chalk.red("Store not found. Run 'cezar init' first."));
     process.exit(1);
   }
 

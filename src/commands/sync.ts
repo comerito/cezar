@@ -15,7 +15,7 @@ export async function syncCommand(opts: SyncOptions, config: Config): Promise<vo
 
   const store = await IssueStore.loadOrNull(config.store.path);
   if (!store) {
-    console.error(chalk.red("Store not found. Run 'issue-manager init' first."));
+    console.error(chalk.red("Store not found. Run 'cezar init' first."));
     process.exit(1);
   }
 
@@ -86,6 +86,6 @@ export async function syncCommand(opts: SyncOptions, config: Config): Promise<vo
   const unanalyzed = store.getIssues({ state: 'open', hasDigest: true })
     .filter(i => i.analysis.duplicatesAnalyzedAt === null).length;
   if (unanalyzed > 0) {
-    console.log(chalk.dim(`  ${unanalyzed} issues need duplicate check — run 'issue-manager run duplicates'`));
+    console.log(chalk.dim(`  ${unanalyzed} issues need duplicate check — run 'cezar run duplicates'`));
   }
 }
