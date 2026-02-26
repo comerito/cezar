@@ -1,6 +1,6 @@
 # Cezar
 
-**Cezar brings order to chaotic GitHub backlogs.** Sync issues locally, let Claude analyze them, then triage through a clean interactive CLI. Find duplicates first — more actions coming. Built for maintainers who'd rather ship than sort.
+**Cezar brings order to chaotic GitHub backlogs.** Sync issues locally, let Claude analyze them, then triage through a clean interactive CLI. 14 built-in actions cover duplicates, priorities, stale issues, security, labeling, and more. Built for maintainers who'd rather ship than sort.
 
 ```
    ·  ██████╗  ███████╗ ███████╗  █████╗  ██████╗  ·
@@ -12,25 +12,44 @@
            AI-powered GitHub issue management
 
 ┌──────────────────────────────────────────────────┐
-│  🗂  Cezar   your-org/your-repo                    │
-│  143 open · 45 closed · synced 2 hours ago        │
-│  Digested: 143/143 · Duplicates: last run 1d ago  │
+│  🗂  Cezar   your-org/your-repo                  │
+│  143 open · 45 closed · synced 2 hours ago       │
+│  Digested: 143/143                               │
 └──────────────────────────────────────────────────┘
 
 ? What would you like to do?
+
+  Triage
 ❯ 🔍  Find Duplicates            45 unanalyzed
-  🔄  Sync with GitHub
-  ──────────────────────────────
-  ✕   Exit
+  🏷️  Auto-Label Issues           32 unanalyzed
+  ❓  Request Missing Info        18 unanalyzed
+  🔁  Recurring Questions         12 unanalyzed
+  🧹  Stale Issue Cleanup          9 stale
+  ✅  Done Detector                5 unchecked
+
+  Intelligence
+  📊  Priority Score              45 unscored
+  🔒  Security Triage             45 unchecked
+
+  Community
+  🌱  Good First Issues           45 unchecked
+  👋  Welcome New Contributors     3 pending
+  🙋  Claim Detector              45 unchecked
+  🔎  Issue Quality Check         45 unchecked
+
+  Release
+  📋  Release Notes
+  🗺️  Milestone Planner
 ```
 
 ## Why Cezar?
 
 - **Offline-first** — issues live in a local JSON store after the initial fetch. No repeated API calls.
-- **AI-powered digests** — Claude generates compact summaries so duplicate detection works on meaning, not keywords.
+- **AI-powered digests** — Claude generates compact summaries so analysis works on meaning, not keywords.
 - **Interactive by default** — a guided TUI handles everything: setup, sync, analysis, and review.
 - **Plugin architecture** — every analysis action is a self-contained module. Adding a new one means creating a folder.
 - **Incremental** — sync only fetches what changed. Actions only process unanalyzed issues.
+- **CI-ready** — every action works non-interactively with `--no-interactive`, `--apply`, and `--dry-run` flags.
 
 ## Requirements
 
@@ -76,19 +95,59 @@ That's it. On first launch Cezar walks you through a setup wizard — enter your
   Setup complete!
 ```
 
-From the hub you can sync with GitHub, run duplicate detection, and review results — all without leaving the app.
+From the hub you can sync with GitHub, run any action, and review results — all without leaving the app.
+
+## Actions
+
+Cezar ships with 14 analysis actions organized into four groups:
+
+### Triage
+
+| Action | Description | Powered by |
+|---|---|---|
+| 🔍 **Find Duplicates** | Detect issues describing the same problem | Claude AI |
+| 🏷️ **Auto-Label Issues** | Suggest and apply labels based on issue content | Claude AI |
+| ❓ **Request Missing Info** | Detect bug reports missing critical info and draft follow-up comments | Claude AI |
+| 🔁 **Recurring Questions** | Find questions already answered in closed issues | Claude AI |
+| 🧹 **Stale Issue Cleanup** | Review and resolve issues with no recent activity | Claude AI |
+| ✅ **Done Detector** | Find open issues likely resolved by merged PRs | Claude AI |
+
+### Intelligence
+
+| Action | Description | Powered by |
+|---|---|---|
+| 📊 **Priority Score** | Assign critical/high/medium/low based on impact signals | Claude AI |
+| 🔒 **Security Triage** | Scan issues for potential security implications | Claude AI |
+
+### Community
+
+| Action | Description | Powered by |
+|---|---|---|
+| 🌱 **Good First Issues** | Tag issues suitable for new contributors with hints | Claude AI |
+| 👋 **Welcome New Contributors** | Post personalized welcome comments to first-time contributors | Claude AI |
+| 🙋 **Claim Detector** | Find issues claimed by contributors in comments | Regex patterns |
+| 🔎 **Issue Quality Check** | Flag spam, vague, and low-quality submissions | Claude AI |
+
+### Release
+
+| Action | Description | Powered by |
+|---|---|---|
+| 📋 **Release Notes** | Generate structured release notes from closed issues | Claude AI |
+| 🗺️ **Milestone Planner** | Group open issues into logical release milestones | Claude AI |
+
+Every action follows the same interactive review pattern: analyze, present results with a summary, then let you review one-by-one (or bulk-accept/skip). If you stop partway through, unreviewed items are saved for the next run.
 
 ## How It Works
 
 Cezar operates in three phases, all driven from the interactive hub:
 
 1. **Fetch** — on setup (or when you choose "Sync with GitHub"), Cezar pulls issues from the GitHub API into a local JSON store.
-2. **Digest** — Claude generates a compact summary for each issue (~80 tokens), including category, affected area, and keywords. A progress bar tracks batch processing in real time.
-3. **Analyze** — actions like duplicate detection run against the digests, not raw issue bodies. This makes analysis fast and token-efficient.
+2. **Digest** — Claude generates a compact summary for each issue (~80 tokens), including category, affected area, and keywords.
+3. **Analyze** — actions run against the digests (or directly against GitHub data for non-AI actions like Claim Detector). Results are persisted per-batch, so even if interrupted, partial progress is saved.
 
-### Duplicate Detection
+### Example: Duplicate Detection
 
-Choose "Find Duplicates" from the hub. Cezar sends compact digests to Claude in batches — with 200 issues, the full knowledge base fits in ~16k tokens. Results are persisted per-batch, so even if interrupted, partial progress is saved.
+Choose "Find Duplicates" from the hub. Cezar sends compact digests to Claude in batches — with 200 issues, the full knowledge base fits in ~16k tokens.
 
 Each duplicate group is presented for interactive review:
 
@@ -150,7 +209,9 @@ For automated pipelines, Cezar exposes direct commands that bypass the interacti
 ```bash
 cezar init -o <owner> -r <repo>          # Bootstrap without the wizard
 cezar sync                                # Incremental fetch
-cezar run duplicates --apply --no-interactive --format json > duplicates.json
+cezar run duplicates --no-interactive     # Run any action non-interactively
+cezar run priority --apply --format json  # Apply results + JSON output
+cezar run stale --dry-run                 # Preview without writing
 ```
 
 See `cezar --help` for the full flag reference.
@@ -166,15 +227,25 @@ src/
 │   └── store.ts                  # IssueStore class — all data access
 ├── services/
 │   ├── github.service.ts         # Octokit wrapper
-│   └── llm.service.ts            # Anthropic SDK wrapper
+│   ├── llm.service.ts            # Anthropic SDK wrapper
+│   └── audit.ts                  # Audit comment formatting
 ├── actions/
 │   ├── action.interface.ts       # Plugin contract
 │   ├── registry.ts               # Plugin registry singleton
-│   └── duplicates/               # First action (self-contained)
-│       ├── prompt.ts             # LLM prompt template
-│       ├── runner.ts             # Detection logic
-│       ├── interactive.ts        # Interactive review UI
-│       └── index.ts              # Registers the action
+│   ├── duplicates/               # Each action is self-contained:
+│   ├── auto-label/               #   prompt.ts  — LLM prompt template
+│   ├── missing-info/             #   runner.ts  — detection logic
+│   ├── recurring-questions/      #   interactive.ts — review UI
+│   ├── stale/                    #   index.ts   — registers the action
+│   ├── done-detector/
+│   ├── priority/
+│   ├── security/
+│   ├── good-first-issue/
+│   ├── contributor-welcome/
+│   ├── claim-detector/
+│   ├── quality/
+│   ├── release-notes/
+│   └── milestone-planner/
 ├── ui/
 │   ├── hub.ts                    # Interactive menu
 │   ├── setup.ts                  # First-run setup wizard
@@ -183,16 +254,15 @@ src/
 └── utils/                        # Config, hashing, chunking, formatting
 ```
 
-## Roadmap
+## Adding a New Action
 
-Cezar is built around a plugin architecture. Future actions planned:
+Each action is a self-contained folder in `src/actions/`. To create one:
 
-- **Priority** — assign critical/high/medium/low to each issue
-- **Stale** — find abandoned issues with no recent activity
-- **Cluster** — group issues by topic
-- **Suggest** — draft a response for each issue
+1. Create `src/actions/your-action/` with `prompt.ts`, `runner.ts`, `interactive.ts`, `index.ts`
+2. Add your analysis fields to `src/store/store.model.ts`
+3. Add a side-effect import to `src/index.ts`
 
-Each action is a self-contained folder in `src/actions/`. See [CONTRIBUTING.md](CONTRIBUTING.md) for how to add one.
+See any existing action folder for the full pattern.
 
 ## License
 
