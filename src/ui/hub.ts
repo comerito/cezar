@@ -2,6 +2,7 @@ import { select, Separator } from '@inquirer/prompts';
 import chalk from 'chalk';
 import { clearScreen, renderLogo } from './logo.js';
 import { renderStatusBox } from './status.js';
+import { runSetupWizard } from './setup.js';
 import { actionRegistry } from '../actions/registry.js';
 import type { ActionDefinition } from '../actions/action.interface.js';
 import { IssueStore } from '../store/store.js';
@@ -9,6 +10,14 @@ import type { Config } from '../models/config.model.js';
 import { syncCommand } from '../commands/sync.js';
 
 export async function launchHub(store: IssueStore | null, config: Config): Promise<void> {
+  // First launch — run setup wizard if no store exists
+  if (!store) {
+    clearScreen();
+    renderLogo();
+    store = await runSetupWizard(config);
+    if (!store) return; // wizard failed or user cancelled
+  }
+
   while (true) {
     clearScreen();
     renderLogo();
