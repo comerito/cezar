@@ -1,5 +1,6 @@
 import { select, Separator } from '@inquirer/prompts';
 import chalk from 'chalk';
+import { clearScreen, renderLogo } from './logo.js';
 import { renderStatusBox } from './status.js';
 import { actionRegistry } from '../actions/registry.js';
 import type { ActionDefinition } from '../actions/action.interface.js';
@@ -8,6 +9,8 @@ import type { Config } from '../models/config.model.js';
 import { syncCommand } from '../commands/sync.js';
 
 export async function launchHub(store: IssueStore | null, config: Config): Promise<void> {
+  clearScreen();
+  renderLogo();
   renderStatusBox(store);
 
   const choices = buildChoices(store);
