@@ -72,13 +72,14 @@ export async function runSetupWizard(config: Config): Promise<IssueStore | null>
 
   // Generate digests if API key is available
   if (config.llm.apiKey) {
-    const digestSpinner = ora('Generating AI digests...').start();
+    const toDigest = store.getIssues({ hasDigest: false });
+    const digestSpinner = ora(`Generating AI digests... 0/${toDigest.length}`).start();
     try {
       const llm = new LLMService(config);
-      const toDigest = store.getIssues({ hasDigest: false });
       const digests = await llm.generateDigests(
         toDigest.map(i => ({ number: i.number, title: i.title, body: i.body })),
         config.sync.digestBatchSize,
+        (done, total) => { digestSpinner.text = `Generating AI digests... ${done}/${total}`; },
       );
 
       let digestCount = 0;

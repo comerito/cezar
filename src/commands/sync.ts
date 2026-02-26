@@ -59,12 +59,13 @@ export async function syncCommand(opts: SyncOptions, config: Config): Promise<vo
   // Re-digest any issues that need it
   const needsDigest = store.getIssues({ hasDigest: false });
   if (needsDigest.length > 0) {
-    const digestSpinner = ora(`Generating digests for ${needsDigest.length} issues...`).start();
+    const digestSpinner = ora(`Generating digests... 0/${needsDigest.length}`).start();
     try {
       const llm = new LLMService(config);
       const digests = await llm.generateDigests(
         needsDigest.map(i => ({ number: i.number, title: i.title, body: i.body })),
         config.sync.digestBatchSize,
+        (done, total) => { digestSpinner.text = `Generating digests... ${done}/${total}`; },
       );
 
       let digestCount = 0;

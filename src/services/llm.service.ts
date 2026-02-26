@@ -39,9 +39,14 @@ export class LLMService {
     this.maxTokens = config.llm.maxTokens;
   }
 
-  async generateDigests(issues: Array<{ number: number; title: string; body: string }>, batchSize: number): Promise<Map<number, IssueDigest>> {
+  async generateDigests(
+    issues: Array<{ number: number; title: string; body: string }>,
+    batchSize: number,
+    onProgress?: (completed: number, total: number) => void,
+  ): Promise<Map<number, IssueDigest>> {
     const results = new Map<number, IssueDigest>();
     const batches = chunkArray(issues, batchSize);
+    let completed = 0;
 
     for (const batch of batches) {
       const prompt = this.buildDigestPrompt(batch);
@@ -59,6 +64,9 @@ export class LLMService {
           });
         }
       }
+
+      completed += batch.length;
+      onProgress?.(completed, issues.length);
     }
 
     return results;

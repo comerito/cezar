@@ -69,13 +69,14 @@ export async function initCommand(opts: InitOptions, config: Config): Promise<vo
 
   // Generate digests
   if (opts.digest !== false) {
-    const digestSpinner = ora('Generating digests...').start();
+    const toDigest = store.getIssues({ hasDigest: false });
+    const digestSpinner = ora(`Generating digests... 0/${toDigest.length}`).start();
     try {
       const llm = new LLMService(config);
-      const toDigest = store.getIssues({ hasDigest: false });
       const digests = await llm.generateDigests(
         toDigest.map(i => ({ number: i.number, title: i.title, body: i.body })),
         config.sync.digestBatchSize,
+        (done, total) => { digestSpinner.text = `Generating digests... ${done}/${total}`; },
       );
 
       let digestCount = 0;
