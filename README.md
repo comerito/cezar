@@ -44,9 +44,9 @@ npm link
 ## Quick Start
 
 ```bash
-# Set your tokens
-export GITHUB_TOKEN=ghp_...
-export ANTHROPIC_API_KEY=sk-ant-...
+# Set your tokens (or create a .env file — see .env.example)
+cp .env.example .env
+# Edit .env with your real tokens
 
 # Initialize — fetches all issues and generates AI digests
 cezar init -o your-org -r your-repo
@@ -144,7 +144,7 @@ Example `.issuemanagerrc.json`:
 }
 ```
 
-Environment variables `GITHUB_TOKEN` and `ANTHROPIC_API_KEY` are automatically picked up and override config file values.
+Cezar automatically loads a `.env` file from the project root. You can also export `GITHUB_TOKEN` and `ANTHROPIC_API_KEY` in your shell — environment variables override config file values.
 
 ## How It Works
 

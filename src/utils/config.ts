@@ -1,3 +1,4 @@
+import 'dotenv/config';
 import { cosmiconfig } from 'cosmiconfig';
 import { ConfigSchema, type Config } from '../models/config.model.js';
 
