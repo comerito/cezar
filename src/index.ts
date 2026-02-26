@@ -18,6 +18,7 @@ import './actions/priority/index.js';
 import './actions/good-first-issue/index.js';
 import './actions/security/index.js';
 import './actions/release-notes/index.js';
+import './actions/milestone-planner/index.js';
 
 const program = new Command()
   .name('cezar')
