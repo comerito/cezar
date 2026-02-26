@@ -5,7 +5,7 @@ import type { DuplicateGroup, DuplicateResults } from './runner.js';
 import { GitHubService } from '../../services/github.service.js';
 import { renderDuplicateGroup } from '../../ui/components/table.js';
 import { confirmAction } from '../../ui/components/confirm.js';
-import { exec } from 'node:child_process';
+import { execFile } from 'node:child_process';
 
 type ReviewDecision = 'store' | 'store-label' | 'skip' | 'browser' | 'stop';
 
@@ -117,6 +117,7 @@ export class DuplicatesInteractiveUI {
 
 function openInBrowser(url: string): void {
   const platform = process.platform;
-  const cmd = platform === 'darwin' ? 'open' : platform === 'win32' ? 'start' : 'xdg-open';
-  exec(`${cmd} ${url}`);
+  const cmd = platform === 'darwin' ? 'open' : platform === 'win32' ? 'cmd' : 'xdg-open';
+  const args = platform === 'win32' ? ['/c', 'start', '', url] : [url];
+  execFile(cmd, args);
 }

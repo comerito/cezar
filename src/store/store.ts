@@ -1,4 +1,4 @@
-import { readFile, writeFile, rename, mkdir } from 'node:fs/promises';
+import { readFile, writeFile, rename, mkdir, unlink } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { StoreSchema, StoredIssueSchema, IssueAnalysisSchema, type Store, type StoredIssue, type IssueAnalysis, type IssueDigest, type StoreMeta } from './store.model.js';
@@ -56,7 +56,12 @@ export class IssueStore {
     const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;
     const json = JSON.stringify(this.data, null, 2);
     await writeFile(tmpPath, json, 'utf-8');
-    await rename(tmpPath, this.filePath);
+    try {
+      await rename(tmpPath, this.filePath);
+    } catch (error) {
+      await unlink(tmpPath).catch(() => {});
+      throw error;
+    }
   }
 
   upsertIssue(issue: Omit<StoredIssue, 'digest' | 'analysis'>): { action: 'created' | 'updated' | 'unchanged' } {

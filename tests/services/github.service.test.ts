@@ -11,17 +11,19 @@ vi.mock('@octokit/rest', () => {
   const mockAddLabels = vi.fn();
 
   return {
-    Octokit: vi.fn().mockImplementation(() => ({
-      paginate: mockPaginate,
-      rest: {
-        issues: {
-          listForRepo: mockListForRepo,
-          getLabel: mockGetLabel,
-          createLabel: mockCreateLabel,
-          addLabels: mockAddLabels,
+    Octokit: vi.fn().mockImplementation(function () {
+      return {
+        paginate: mockPaginate,
+        rest: {
+          issues: {
+            listForRepo: mockListForRepo,
+            getLabel: mockGetLabel,
+            createLabel: mockCreateLabel,
+            addLabels: mockAddLabels,
+          },
         },
-      },
-    })),
+      };
+    }),
     __mockPaginate: mockPaginate,
     __mockGetLabel: mockGetLabel,
     __mockCreateLabel: mockCreateLabel,
