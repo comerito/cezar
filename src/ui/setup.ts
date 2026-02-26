@@ -5,6 +5,8 @@ import type { Config } from '../models/config.model.js';
 import { IssueStore } from '../store/store.js';
 import { GitHubService } from '../services/github.service.js';
 import { LLMService } from '../services/llm.service.js';
+import { progressBar } from './components/progress.js';
+import { printDigestSummary } from '../utils/formatter.js';
 
 export async function runSetupWizard(config: Config): Promise<IssueStore | null> {
   console.log(chalk.bold('\n  Welcome! Let\'s connect to your GitHub repo.\n'));
@@ -73,13 +75,13 @@ export async function runSetupWizard(config: Config): Promise<IssueStore | null>
   // Generate digests if API key is available
   if (config.llm.apiKey) {
     const toDigest = store.getIssues({ hasDigest: false });
-    const digestSpinner = ora(`Generating AI digests... 0/${toDigest.length}`).start();
+    const digestSpinner = ora(`Generating digests  ${progressBar(0, toDigest.length)}`).start();
     try {
       const llm = new LLMService(config);
       const digests = await llm.generateDigests(
         toDigest.map(i => ({ number: i.number, title: i.title, body: i.body })),
         config.sync.digestBatchSize,
-        (done, total) => { digestSpinner.text = `Generating AI digests... ${done}/${total}`; },
+        (done, total) => { digestSpinner.text = `Generating digests  ${progressBar(done, total)}`; },
       );
 
       let digestCount = 0;
@@ -89,6 +91,7 @@ export async function runSetupWizard(config: Config): Promise<IssueStore | null>
       }
       await store.save();
       digestSpinner.succeed(`Digested ${digestCount}/${toDigest.length} issues`);
+      printDigestSummary(store);
     } catch (error) {
       digestSpinner.warn('Digest generation failed (partial results saved)');
       console.error(chalk.yellow(`  ${(error as Error).message}`));

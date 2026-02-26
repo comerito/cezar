@@ -4,6 +4,8 @@ import type { Config } from '../models/config.model.js';
 import { IssueStore } from '../store/store.js';
 import { GitHubService } from '../services/github.service.js';
 import { LLMService } from '../services/llm.service.js';
+import { progressBar } from '../ui/components/progress.js';
+import { printDigestSummary } from '../utils/formatter.js';
 
 interface SyncOptions {
   token?: string;
@@ -59,13 +61,13 @@ export async function syncCommand(opts: SyncOptions, config: Config): Promise<vo
   // Re-digest any issues that need it
   const needsDigest = store.getIssues({ hasDigest: false });
   if (needsDigest.length > 0) {
-    const digestSpinner = ora(`Generating digests... 0/${needsDigest.length}`).start();
+    const digestSpinner = ora(`Generating digests  ${progressBar(0, needsDigest.length)}`).start();
     try {
       const llm = new LLMService(config);
       const digests = await llm.generateDigests(
         needsDigest.map(i => ({ number: i.number, title: i.title, body: i.body })),
         config.sync.digestBatchSize,
-        (done, total) => { digestSpinner.text = `Generating digests... ${done}/${total}`; },
+        (done, total) => { digestSpinner.text = `Generating digests  ${progressBar(done, total)}`; },
       );
 
       let digestCount = 0;
@@ -75,6 +77,7 @@ export async function syncCommand(opts: SyncOptions, config: Config): Promise<vo
       }
       await store.save();
       digestSpinner.succeed(`Re-digested ${digestCount} issues`);
+      printDigestSummary(store);
     } catch (error) {
       digestSpinner.warn('Digest generation failed (partial results saved)');
       console.error(chalk.yellow((error as Error).message));

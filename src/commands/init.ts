@@ -4,6 +4,8 @@ import type { Config } from '../models/config.model.js';
 import { IssueStore } from '../store/store.js';
 import { GitHubService } from '../services/github.service.js';
 import { LLMService } from '../services/llm.service.js';
+import { progressBar } from '../ui/components/progress.js';
+import { printDigestSummary } from '../utils/formatter.js';
 
 interface InitOptions {
   owner?: string;
@@ -70,13 +72,13 @@ export async function initCommand(opts: InitOptions, config: Config): Promise<vo
   // Generate digests
   if (opts.digest !== false) {
     const toDigest = store.getIssues({ hasDigest: false });
-    const digestSpinner = ora(`Generating digests... 0/${toDigest.length}`).start();
+    const digestSpinner = ora(`Generating digests  ${progressBar(0, toDigest.length)}`).start();
     try {
       const llm = new LLMService(config);
       const digests = await llm.generateDigests(
         toDigest.map(i => ({ number: i.number, title: i.title, body: i.body })),
         config.sync.digestBatchSize,
-        (done, total) => { digestSpinner.text = `Generating digests... ${done}/${total}`; },
+        (done, total) => { digestSpinner.text = `Generating digests  ${progressBar(done, total)}`; },
       );
 
       let digestCount = 0;
@@ -86,21 +88,8 @@ export async function initCommand(opts: InitOptions, config: Config): Promise<vo
       }
       await store.save();
 
-      // Count categories
-      const allDigested = store.getIssues({ hasDigest: true });
-      const categories = new Map<string, number>();
-      for (const issue of allDigested) {
-        const cat = issue.digest!.category;
-        categories.set(cat, (categories.get(cat) ?? 0) + 1);
-      }
-      const catSummary = [...categories.entries()]
-        .map(([cat, count]) => `${count} ${cat}s`)
-        .join(' · ');
-
       digestSpinner.succeed(`Digested ${digestCount}/${toDigest.length} issues`);
-      if (catSummary) {
-        console.log(chalk.dim(`  Categories: ${catSummary}`));
-      }
+      printDigestSummary(store);
     } catch (error) {
       digestSpinner.warn('Digest generation failed (partial results saved)');
       console.error(chalk.yellow((error as Error).message));
