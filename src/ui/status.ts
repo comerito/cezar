@@ -36,7 +36,7 @@ export function renderStatusBox(store: IssueStore | null): void {
   const box = boxen(lines.join('\n'), {
     padding: 1,
     borderColor: 'cyan',
-    title: '🗂  Cezar',
+    title: '🗂  Cezar ',
     titleAlignment: 'left',
   });
 
