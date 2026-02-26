@@ -20,6 +20,7 @@ import './actions/security/index.js';
 import './actions/release-notes/index.js';
 import './actions/milestone-planner/index.js';
 import './actions/stale/index.js';
+import './actions/contributor-welcome/index.js';
 
 const program = new Command()
   .name('cezar')
