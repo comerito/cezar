@@ -45,18 +45,22 @@ export async function syncCommand(opts: SyncOptions, config: Config): Promise<vo
   let created = 0;
   let updated = 0;
   let unchanged = 0;
+  let closed = 0;
 
   for (const issue of issues) {
     const result = store.upsertIssue(issue);
     if (result.action === 'created') created++;
     else if (result.action === 'updated') updated++;
     else unchanged++;
+    if (result.stateChanged) closed++;
   }
 
   store.updateMeta({ lastSyncedAt: new Date().toISOString() });
   await store.save();
 
-  spinner.succeed(`Fetched ${issues.length} issues — ${created} new, ${updated} updated`);
+  const parts = [`${created} new`, `${updated} updated`];
+  if (closed > 0) parts.push(`${closed} state changed`);
+  spinner.succeed(`Fetched ${issues.length} issues — ${parts.join(', ')}`);
 
   // Re-digest any issues that need it
   const needsDigest = store.getIssues({ hasDigest: false });

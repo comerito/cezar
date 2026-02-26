@@ -64,13 +64,15 @@ export class IssueStore {
     }
   }
 
-  upsertIssue(issue: Omit<StoredIssue, 'digest' | 'analysis'>): { action: 'created' | 'updated' | 'unchanged' } {
+  upsertIssue(issue: Omit<StoredIssue, 'digest' | 'analysis'>): { action: 'created' | 'updated' | 'unchanged'; stateChanged?: boolean } {
     const existing = this.data.issues.find(i => i.number === issue.number);
     if (!existing) {
       const full = StoredIssueSchema.parse({ ...issue, digest: null, analysis: {} });
       this.data.issues.push(full);
       return { action: 'created' };
     }
+
+    const stateChanged = existing.state !== issue.state;
 
     if (existing.contentHash !== issue.contentHash) {
       existing.title = issue.title;
@@ -85,7 +87,7 @@ export class IssueStore {
       existing.reactions = issue.reactions;
       // Clear digest when content changes — needs re-digesting
       existing.digest = null;
-      return { action: 'updated' };
+      return { action: 'updated', stateChanged };
     }
 
     // Update mutable fields that don't affect content hash
@@ -93,7 +95,7 @@ export class IssueStore {
     existing.labels = issue.labels;
     existing.commentCount = issue.commentCount;
     existing.reactions = issue.reactions;
-    return { action: 'unchanged' };
+    return { action: stateChanged ? 'updated' : 'unchanged', stateChanged };
   }
 
   setDigest(issueNumber: number, digest: IssueDigest): void {

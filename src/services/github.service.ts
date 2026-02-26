@@ -52,8 +52,10 @@ export class GitHubService {
     }
   }
 
-  async fetchIssuesSince(since: string, includeClosed = false): Promise<RawIssue[]> {
-    const state = includeClosed ? 'all' : 'open';
+  async fetchIssuesSince(since: string, _includeClosed = false): Promise<RawIssue[]> {
+    // Always fetch all states for incremental sync — we need to detect
+    // issues that were closed since the last sync to update local state.
+    const state = 'all' as const;
     try {
       const issues = await this.octokit.paginate(this.octokit.rest.issues.listForRepo, {
         owner: this.owner,
