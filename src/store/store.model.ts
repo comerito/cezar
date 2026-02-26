@@ -7,10 +7,56 @@ export const IssueAnalysisSchema = z.object({
   duplicateReason: z.string().nullable().default(null),
   duplicatesAnalyzedAt: z.string().nullable().default(null),
 
-  // Priority action (future — included now so store schema is stable)
+  // Priority action
   priority: z.enum(['critical', 'high', 'medium', 'low']).nullable().default(null),
   priorityReason: z.string().nullable().default(null),
+  prioritySignals: z.array(z.string()).nullable().default(null),
   priorityAnalyzedAt: z.string().nullable().default(null),
+
+  // Auto-label action
+  suggestedLabels: z.array(z.string()).nullable().default(null),
+  labelsReason: z.string().nullable().default(null),
+  labelsAnalyzedAt: z.string().nullable().default(null),
+  labelsAppliedAt: z.string().nullable().default(null),
+
+  // Missing info action
+  missingInfoFields: z.array(z.string()).nullable().default(null),
+  missingInfoComment: z.string().nullable().default(null),
+  missingInfoAnalyzedAt: z.string().nullable().default(null),
+  missingInfoPostedAt: z.string().nullable().default(null),
+
+  // Recurring question action
+  isRecurringQuestion: z.boolean().nullable().default(null),
+  similarClosedIssues: z.array(z.number()).nullable().default(null),
+  suggestedResponse: z.string().nullable().default(null),
+  recurringAnalyzedAt: z.string().nullable().default(null),
+
+  // Good first issue action
+  isGoodFirstIssue: z.boolean().nullable().default(null),
+  goodFirstIssueReason: z.string().nullable().default(null),
+  goodFirstIssueHint: z.string().nullable().default(null),
+  goodFirstIssueAnalyzedAt: z.string().nullable().default(null),
+
+  // Security triage action
+  securityFlag: z.boolean().nullable().default(null),
+  securityConfidence: z.number().min(0).max(1).nullable().default(null),
+  securityCategory: z.string().nullable().default(null),
+  securitySeverity: z.enum(['critical', 'high', 'medium', 'low']).nullable().default(null),
+  securityAnalyzedAt: z.string().nullable().default(null),
+
+  // Stale issue action
+  staleAction: z.enum(['close-resolved', 'close-wontfix', 'label-stale', 'keep-open']).nullable().default(null),
+  staleReason: z.string().nullable().default(null),
+  staleDraftComment: z.string().nullable().default(null),
+  staleAnalyzedAt: z.string().nullable().default(null),
+
+  // Quality check action
+  qualityFlag: z.enum(['spam', 'vague', 'test', 'wrong-language', 'ok']).nullable().default(null),
+  qualityReason: z.string().nullable().default(null),
+  qualityAnalyzedAt: z.string().nullable().default(null),
+
+  // Contributor welcome action
+  welcomeCommentPostedAt: z.string().nullable().default(null),
 });
 
 export type IssueAnalysis = z.infer<typeof IssueAnalysisSchema>;
@@ -36,6 +82,8 @@ export const StoredIssueSchema = z.object({
   updatedAt: z.string(),
   htmlUrl: z.string(),
   contentHash: z.string(),
+  commentCount: z.number().default(0),
+  reactions: z.number().default(0),
   digest: IssueDigestSchema.nullable().default(null),
   analysis: IssueAnalysisSchema.default({}),
 });

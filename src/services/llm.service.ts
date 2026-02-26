@@ -79,6 +79,15 @@ export class LLMService {
     return parsed?.duplicates ?? [];
   }
 
+  /**
+   * Generic analysis method — actions provide their own prompt and response schema.
+   * Returns null if the LLM response cannot be parsed.
+   */
+  async analyze<T>(prompt: string, schema: z.ZodSchema<T>): Promise<T | null> {
+    const raw = await this.callLLM(prompt);
+    return this.parseJSON(raw, schema);
+  }
+
   private buildDigestPrompt(issues: Array<{ number: number; title: string; body: string }>): string {
     const issueList = issues.map(i =>
       `#${i.number}: ${i.title}\n${i.body.slice(0, 2000)}`

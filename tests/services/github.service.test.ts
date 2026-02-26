@@ -9,6 +9,12 @@ vi.mock('@octokit/rest', () => {
   const mockGetLabel = vi.fn();
   const mockCreateLabel = vi.fn();
   const mockAddLabels = vi.fn();
+  const mockRemoveLabel = vi.fn();
+  const mockSetLabels = vi.fn();
+  const mockCreateComment = vi.fn();
+  const mockUpdate = vi.fn();
+  const mockListLabelsForRepo = vi.fn();
+  const mockListComments = vi.fn();
 
   return {
     Octokit: vi.fn().mockImplementation(function () {
@@ -20,6 +26,12 @@ vi.mock('@octokit/rest', () => {
             getLabel: mockGetLabel,
             createLabel: mockCreateLabel,
             addLabels: mockAddLabels,
+            removeLabel: mockRemoveLabel,
+            setLabels: mockSetLabels,
+            createComment: mockCreateComment,
+            update: mockUpdate,
+            listLabelsForRepo: mockListLabelsForRepo,
+            listComments: mockListComments,
           },
         },
       };
@@ -28,6 +40,12 @@ vi.mock('@octokit/rest', () => {
     __mockGetLabel: mockGetLabel,
     __mockCreateLabel: mockCreateLabel,
     __mockAddLabels: mockAddLabels,
+    __mockRemoveLabel: mockRemoveLabel,
+    __mockSetLabels: mockSetLabels,
+    __mockCreateComment: mockCreateComment,
+    __mockUpdate: mockUpdate,
+    __mockListLabelsForRepo: mockListLabelsForRepo,
+    __mockListComments: mockListComments,
   };
 });
 
@@ -36,7 +54,11 @@ function makeConfig(overrides: Partial<Config['github']> = {}): Config {
     github: { owner: 'test-owner', repo: 'test-repo', token: 'ghp_test123', ...overrides },
     llm: { model: 'claude-sonnet-4-20250514', maxTokens: 4096, apiKey: '' },
     store: { path: '.issue-store' },
-    sync: { digestBatchSize: 20, duplicateBatchSize: 30, minDuplicateConfidence: 0.80, includeClosed: false },
+    sync: {
+      digestBatchSize: 20, duplicateBatchSize: 30, minDuplicateConfidence: 0.80, includeClosed: false,
+      labelBatchSize: 20, missingInfoBatchSize: 15, recurringBatchSize: 15,
+      priorityBatchSize: 20, securityBatchSize: 20, staleDaysThreshold: 90, staleCloseDays: 14,
+    },
   };
 }
 
@@ -51,6 +73,8 @@ function makeGitHubIssue(number: number, overrides: Record<string, unknown> = {}
     created_at: '2024-01-01T00:00:00Z',
     updated_at: '2024-01-01T00:00:00Z',
     html_url: `https://github.com/test/repo/issues/${number}`,
+    comments: 0,
+    reactions: { total_count: 0 },
     ...overrides,
   };
 }
@@ -73,7 +97,7 @@ describe('GitHubService', () => {
   describe('fetchAllIssues', () => {
     it('fetches and maps issues correctly', async () => {
       mockPaginate.mockResolvedValue([
-        makeGitHubIssue(1),
+        makeGitHubIssue(1, { comments: 3, reactions: { total_count: 5 } }),
         makeGitHubIssue(2, { state: 'closed' }),
       ]);
 
@@ -87,7 +111,11 @@ describe('GitHubService', () => {
       expect(issues[0].labels).toEqual(['bug']);
       expect(issues[0].author).toBe('author1');
       expect(issues[0].contentHash).toBeTruthy();
+      expect(issues[0].commentCount).toBe(3);
+      expect(issues[0].reactions).toBe(5);
       expect(issues[1].state).toBe('closed');
+      expect(issues[1].commentCount).toBe(0);
+      expect(issues[1].reactions).toBe(0);
     });
 
     it('excludes pull requests', async () => {

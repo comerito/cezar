@@ -7,6 +7,7 @@ actionRegistry.register({
   label: 'Find Duplicates',
   description: 'Detect issues describing the same problem using AI',
   icon: '🔍',
+  group: 'triage',
 
   getBadge(store) {
     const issues = store.getIssues({ state: 'open', hasDigest: true });

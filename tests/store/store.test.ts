@@ -19,6 +19,8 @@ function makeIssue(number: number, overrides: Record<string, unknown> = {}) {
     updatedAt: '2024-01-01T00:00:00Z',
     htmlUrl: `https://github.com/test/repo/issues/${number}`,
     contentHash: contentHash(title, body),
+    commentCount: 0,
+    reactions: 0,
     ...overrides,
   };
 }

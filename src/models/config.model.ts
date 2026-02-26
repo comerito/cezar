@@ -23,6 +23,13 @@ export const ConfigSchema = z.object({
     duplicateBatchSize: z.number().default(30),
     minDuplicateConfidence: z.number().default(0.80),
     includeClosed: z.boolean().default(false),
+    labelBatchSize: z.number().default(20),
+    missingInfoBatchSize: z.number().default(15),
+    recurringBatchSize: z.number().default(15),
+    priorityBatchSize: z.number().default(20),
+    securityBatchSize: z.number().default(20),
+    staleDaysThreshold: z.number().default(90),
+    staleCloseDays: z.number().default(14),
   }).default({}),
 });
 

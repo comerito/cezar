@@ -13,7 +13,11 @@ function makeConfig(): Config {
     github: { owner: 'test', repo: 'repo', token: 'ghp_test' },
     llm: { model: 'claude-sonnet-4-20250514', maxTokens: 4096, apiKey: 'sk-ant-test123' },
     store: { path: '' },
-    sync: { digestBatchSize: 20, duplicateBatchSize: 30, minDuplicateConfidence: 0.80, includeClosed: false },
+    sync: {
+      digestBatchSize: 20, duplicateBatchSize: 30, minDuplicateConfidence: 0.80, includeClosed: false,
+      labelBatchSize: 20, missingInfoBatchSize: 15, recurringBatchSize: 15,
+      priorityBatchSize: 20, securityBatchSize: 20, staleDaysThreshold: 90, staleCloseDays: 14,
+    },
   };
 }
 
@@ -31,6 +35,8 @@ function makeIssueData(number: number, overrides: Record<string, unknown> = {}) 
     updatedAt: '2024-01-01T00:00:00Z',
     htmlUrl: `https://github.com/test/repo/issues/${number}`,
     contentHash: contentHash(title, body),
+    commentCount: 0,
+    reactions: 0,
     ...overrides,
   };
 }

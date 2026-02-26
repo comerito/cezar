@@ -1,6 +1,8 @@
 import type { IssueStore } from '../store/store.js';
 import type { Config } from '../models/config.model.js';
 
+export type ActionGroup = 'triage' | 'intelligence' | 'release' | 'community';
+
 export interface ActionDefinition {
   /** Unique machine identifier. Used as CLI argument: `cezar run duplicates` */
   id: string;
@@ -13,6 +15,9 @@ export interface ActionDefinition {
 
   /** Emoji icon shown in menu */
   icon: string;
+
+  /** Menu section grouping — actions with the same group are shown together */
+  group: ActionGroup;
 
   /**
    * Returns a short badge string shown next to the action in the menu.

@@ -4,7 +4,7 @@ import { clearScreen, renderLogo } from './logo.js';
 import { renderStatusBox } from './status.js';
 import { runSetupWizard } from './setup.js';
 import { actionRegistry } from '../actions/registry.js';
-import type { ActionDefinition } from '../actions/action.interface.js';
+import type { ActionDefinition, ActionGroup } from '../actions/action.interface.js';
 import { IssueStore } from '../store/store.js';
 import type { Config } from '../models/config.model.js';
 import { syncCommand } from '../commands/sync.js';
@@ -59,25 +59,46 @@ interface SelectChoice {
   disabled?: string | boolean;
 }
 
+const GROUP_ORDER: ActionGroup[] = ['triage', 'intelligence', 'release', 'community'];
+
 function buildChoices(store: IssueStore | null): Array<SelectChoice | Separator> {
   const actions = actionRegistry.getAll();
 
-  const actionChoices: Array<SelectChoice | Separator> = actions.map(action => {
-    if (!store) {
-      return {
-        name: formatActionChoice(action, null),
-        value: action.id,
-        disabled: 'Run init first',
-      };
+  // Group actions by their group property
+  const grouped = new Map<ActionGroup, ActionDefinition[]>();
+  for (const action of actions) {
+    const group = action.group;
+    if (!grouped.has(group)) grouped.set(group, []);
+    grouped.get(group)!.push(action);
+  }
+
+  const actionChoices: Array<SelectChoice | Separator> = [];
+
+  for (const group of GROUP_ORDER) {
+    const groupActions = grouped.get(group);
+    if (!groupActions || groupActions.length === 0) continue;
+
+    if (actionChoices.length > 0) {
+      actionChoices.push(new Separator());
     }
 
-    const availability = action.isAvailable(store);
-    return {
-      name: formatActionChoice(action, store),
-      value: action.id,
-      disabled: availability === true ? false : availability,
-    };
-  });
+    for (const action of groupActions) {
+      if (!store) {
+        actionChoices.push({
+          name: formatActionChoice(action, null),
+          value: action.id,
+          disabled: 'Run init first',
+        });
+      } else {
+        const availability = action.isAvailable(store);
+        actionChoices.push({
+          name: formatActionChoice(action, store),
+          value: action.id,
+          disabled: availability === true ? false : availability,
+        });
+      }
+    }
+  }
 
   return [
     ...actionChoices,

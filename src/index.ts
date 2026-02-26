@@ -11,6 +11,13 @@ import { IssueStore } from './store/store.js';
 
 // Register all actions (side-effect imports)
 import './actions/duplicates/index.js';
+import './actions/missing-info/index.js';
+import './actions/auto-label/index.js';
+import './actions/recurring-questions/index.js';
+import './actions/priority/index.js';
+import './actions/good-first-issue/index.js';
+import './actions/security/index.js';
+import './actions/release-notes/index.js';
 
 const program = new Command()
   .name('cezar')

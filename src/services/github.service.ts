@@ -13,6 +13,8 @@ export interface RawIssue {
   updatedAt: string;
   htmlUrl: string;
   contentHash: string;
+  commentCount: number;
+  reactions: number;
 }
 
 export class GitHubService {
@@ -87,7 +89,7 @@ export class GitHubService {
           repo: this.repo,
           name: label,
           color: 'e4e669',
-          description: 'Duplicate issue detected by cezar',
+          description: 'Managed by cezar',
         });
       }
 
@@ -97,6 +99,100 @@ export class GitHubService {
         issue_number: issueNumber,
         labels: [label],
       });
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async removeLabel(issueNumber: number, label: string): Promise<void> {
+    try {
+      await this.octokit.rest.issues.removeLabel({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        name: label,
+      });
+    } catch (error) {
+      // Ignore 404 — label wasn't on the issue
+      if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === 404) {
+        return;
+      }
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async setLabels(issueNumber: number, labels: string[]): Promise<void> {
+    try {
+      await this.octokit.rest.issues.setLabels({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        labels,
+      });
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async addComment(issueNumber: number, body: string): Promise<void> {
+    try {
+      await this.octokit.rest.issues.createComment({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        body,
+      });
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async closeIssue(issueNumber: number, reason: 'completed' | 'not_planned' = 'completed'): Promise<void> {
+    try {
+      await this.octokit.rest.issues.update({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        state: 'closed',
+        state_reason: reason,
+      });
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async fetchRepoLabels(): Promise<string[]> {
+    try {
+      const labels = await this.octokit.paginate(this.octokit.rest.issues.listLabelsForRepo, {
+        owner: this.owner,
+        repo: this.repo,
+        per_page: 100,
+      });
+      return labels.map(l => l.name);
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async getIssueComments(issueNumber: number): Promise<Array<{ author: string; body: string; createdAt: string }>> {
+    try {
+      const comments = await this.octokit.paginate(this.octokit.rest.issues.listComments, {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        per_page: 100,
+      });
+      return comments.map(c => ({
+        author: c.user?.login ?? 'unknown',
+        body: c.body ?? '',
+        createdAt: c.created_at,
+      }));
     } catch (error) {
       this.handleError(error);
       throw error;
@@ -114,6 +210,8 @@ export class GitHubService {
       created_at: string;
       updated_at: string;
       html_url: string;
+      comments: number;
+      reactions?: { total_count: number };
     };
 
     const title = issue.title;
@@ -130,6 +228,8 @@ export class GitHubService {
       updatedAt: issue.updated_at,
       htmlUrl: issue.html_url,
       contentHash: contentHash(title, body),
+      commentCount: issue.comments ?? 0,
+      reactions: issue.reactions?.total_count ?? 0,
     };
   }
 

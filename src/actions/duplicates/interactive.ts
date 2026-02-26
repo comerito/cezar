@@ -3,6 +3,7 @@ import chalk from 'chalk';
 import type { Config } from '../../models/config.model.js';
 import type { DuplicateGroup, DuplicateResults } from './runner.js';
 import { GitHubService } from '../../services/github.service.js';
+import { postAuditComment } from '../../services/audit.js';
 import { renderDuplicateGroup } from '../../ui/components/table.js';
 import { confirmAction } from '../../ui/components/confirm.js';
 import { execFile } from 'node:child_process';
@@ -104,8 +105,13 @@ export class DuplicatesInteractiveUI {
         try {
           const github = new GitHubService(this.config);
           for (const review of toLabel) {
-            await github.addLabel(review.group.duplicate.number, 'duplicate');
-            console.log(chalk.green(`  ✓ Label applied to #${review.group.duplicate.number}`));
+            const { duplicate, original } = review.group;
+            await github.addLabel(duplicate.number, 'duplicate');
+            await postAuditComment(github, duplicate.number, [
+              `Marked as duplicate of #${original.number} (${Math.round(review.group.confidence * 100)}% confidence)`,
+              `Added \`duplicate\` label`,
+            ]);
+            console.log(chalk.green(`  ✓ Label + audit comment applied to #${duplicate.number}`));
           }
         } catch (error) {
           console.error(chalk.red(`  Failed to apply labels: ${(error as Error).message}`));

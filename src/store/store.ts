@@ -81,6 +81,8 @@ export class IssueStore {
       existing.updatedAt = issue.updatedAt;
       existing.htmlUrl = issue.htmlUrl;
       existing.contentHash = issue.contentHash;
+      existing.commentCount = issue.commentCount;
+      existing.reactions = issue.reactions;
       // Clear digest when content changes — needs re-digesting
       existing.digest = null;
       return { action: 'updated' };
@@ -89,6 +91,8 @@ export class IssueStore {
     // Update mutable fields that don't affect content hash
     existing.state = issue.state;
     existing.labels = issue.labels;
+    existing.commentCount = issue.commentCount;
+    existing.reactions = issue.reactions;
     return { action: 'unchanged' };
   }
 
