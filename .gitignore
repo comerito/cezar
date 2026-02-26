@@ -140,5 +140,8 @@ vite.config.ts.timestamp-*
 # Issue manager store
 .issue-store/
 
+# IDE
+.idea/
+
 # Claude Code
 .claude/
