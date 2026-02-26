@@ -111,6 +111,19 @@ export class QualityInteractiveUI {
       }
     }
 
+    // Reset unreviewed items so they appear on the next run
+    if (stopped) {
+      const reviewed = new Set([
+        ...toApply.map(r => r.item.number),
+        ...skipped.map(s => s.number),
+      ]);
+      for (const item of reviewItems) {
+        if (!reviewed.has(item.number)) {
+          this.results.store.setAnalysis(item.number, { qualityAnalyzedAt: null });
+        }
+      }
+    }
+
     // Summary
     const willLabel = toApply.filter(r => !r.close).length;
     const willClose = toApply.filter(r => r.close).length;

@@ -113,6 +113,19 @@ export class PriorityInteractiveUI {
       }
     }
 
+    // Reset unreviewed items so they appear on the next run
+    if (stopped) {
+      const reviewed = new Set([
+        ...toApply.map(r => r.item.number),
+        ...skipped.map(s => s.number),
+      ]);
+      for (const item of this.results.items) {
+        if (!reviewed.has(item.number)) {
+          this.results.store.setAnalysis(item.number, { priorityAnalyzedAt: null });
+        }
+      }
+    }
+
     // Summary
     console.log('');
     console.log(chalk.bold('Review complete'));

@@ -76,6 +76,14 @@ export class StaleInteractiveUI {
 
       toApply = await this.reviewItems(reviewItems);
 
+      // Reset unreviewed items (stopped early) so they appear on the next run
+      const reviewedNumbers = new Set(toApply.map(r => r.item.number));
+      for (const item of reviewItems) {
+        if (!reviewedNumbers.has(item.number)) {
+          this.results.store.setAnalysis(item.number, { staleAnalyzedAt: null });
+        }
+      }
+
       // For review-closes mode, auto-accept non-close items
       if (initialDecision === 'review-closes') {
         const nonCloseItems = this.results.items.filter(

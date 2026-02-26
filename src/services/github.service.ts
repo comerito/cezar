@@ -189,6 +189,20 @@ export class GitHubService {
     }
   }
 
+  async addAssignees(issueNumber: number, assignees: string[]): Promise<void> {
+    try {
+      await this.octokit.rest.issues.addAssignees({
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        assignees,
+      });
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
   async getIssueComments(issueNumber: number): Promise<Array<{ author: string; body: string; createdAt: string }>> {
     try {
       const comments = await this.octokit.paginate(this.octokit.rest.issues.listComments, {

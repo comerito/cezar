@@ -111,6 +111,19 @@ export class SecurityInteractiveUI {
       }
     }
 
+    // Reset unreviewed items so they appear on the next run
+    if (stopped) {
+      const reviewed = new Set([
+        ...toApply.map(r => r.finding.number),
+        ...skipped.map(s => s.number),
+      ]);
+      for (const finding of this.results.findings) {
+        if (!reviewed.has(finding.number)) {
+          this.results.store.setAnalysis(finding.number, { securityAnalyzedAt: null });
+        }
+      }
+    }
+
     // Summary
     console.log('');
     console.log(chalk.bold('Review complete'));

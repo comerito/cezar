@@ -74,6 +74,19 @@ export class RecurringQuestionInteractiveUI {
       }
     }
 
+    // Reset unreviewed items so they appear on the next run
+    if (stopped) {
+      const reviewed = new Set([
+        ...toPost.map(r => r.item.number),
+        ...skipped.map(s => s.number),
+      ]);
+      for (const item of this.results.items) {
+        if (!reviewed.has(item.number)) {
+          this.results.store.setAnalysis(item.number, { recurringAnalyzedAt: null });
+        }
+      }
+    }
+
     // Summary
     console.log('');
     console.log(chalk.bold('Review complete'));

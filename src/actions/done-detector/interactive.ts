@@ -75,6 +75,14 @@ export class DoneDetectorInteractiveUI {
       toApply = resolved.map(item => ({ item, finalAction: 'close' as const }));
     } else {
       toApply = await this.reviewItems(resolved);
+
+      // Reset unreviewed items (stopped early) so they appear on the next run
+      const reviewedNumbers = new Set(toApply.map(r => r.item.number));
+      for (const item of resolved) {
+        if (!reviewedNumbers.has(item.number)) {
+          this.results.store.setAnalysis(item.number, { doneAnalyzedAt: null });
+        }
+      }
     }
 
     // Summary

@@ -74,6 +74,16 @@ export class DuplicatesInteractiveUI {
       }
     }
 
+    // Reset unreviewed items so they appear on the next run
+    if (stopped) {
+      const reviewed = new Set(reviews.map(r => r.group.duplicate.number));
+      for (const group of this.results.groups) {
+        if (!reviewed.has(group.duplicate.number)) {
+          this.results.store.setAnalysis(group.duplicate.number, { duplicatesAnalyzedAt: null });
+        }
+      }
+    }
+
     // Summary
     const confirmed = reviews.filter(r => r.decision === 'store' || r.decision === 'store-label');
     const toLabel = reviews.filter(r => r.decision === 'store-label');

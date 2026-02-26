@@ -66,6 +66,19 @@ export class AutoLabelInteractiveUI {
       }
     }
 
+    // Reset unreviewed items so they appear on the next run
+    if (stopped) {
+      const reviewed = new Set([
+        ...toApply.map(r => r.suggestion.number),
+        ...skipped.map(s => s.number),
+      ]);
+      for (const suggestion of this.results.suggestions) {
+        if (!reviewed.has(suggestion.number)) {
+          this.results.store.setAnalysis(suggestion.number, { labelsAnalyzedAt: null });
+        }
+      }
+    }
+
     // Summary
     console.log('');
     console.log(chalk.bold('Review complete'));

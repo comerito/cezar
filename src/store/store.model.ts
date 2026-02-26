@@ -58,6 +58,11 @@ export const IssueAnalysisSchema = z.object({
   // Contributor welcome action
   welcomeCommentPostedAt: z.string().nullable().default(null),
 
+  // Claim detector action
+  claimDetectedBy: z.string().nullable().default(null),
+  claimComment: z.string().nullable().default(null),
+  claimDetectedAt: z.string().nullable().default(null),
+
   // Done detector action
   doneDetected: z.boolean().nullable().default(null),
   doneConfidence: z.number().min(0).max(1).nullable().default(null),
