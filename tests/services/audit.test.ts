@@ -13,14 +13,14 @@ describe('audit', () => {
   });
 
   describe('formatAuditComment', () => {
-    it('formats a standalone audit comment with date and actions', () => {
+    it('formats a standalone audit comment with full timestamp and actions', () => {
       const result = formatAuditComment([
         'Marked as duplicate of #45 (95% confidence)',
         'Added `duplicate` label',
       ]);
 
       expect(result).toContain('**CEZAR update**');
-      expect(result).toContain('2026-03-15');
+      expect(result).toContain('2026-03-15T10:30:00.000Z');
       expect(result).toContain('- Marked as duplicate of #45 (95% confidence)');
       expect(result).toContain('- Added `duplicate` label');
     });
@@ -48,7 +48,7 @@ describe('audit', () => {
       // Footer is appended after separator
       expect(result).toContain('---');
       expect(result).toContain('**CEZAR update**');
-      expect(result).toContain('2026-03-15');
+      expect(result).toContain('2026-03-15T10:30:00.000Z');
       expect(result).toContain('- Requested missing information: reproduction steps, OS');
       expect(result).toContain('- Added `needs-info` label');
     });

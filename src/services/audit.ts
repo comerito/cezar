@@ -5,9 +5,9 @@ import type { GitHubService } from './github.service.js';
  * their own content (e.g. label-only operations).
  */
 export function formatAuditComment(actions: string[]): string {
-  const date = new Date().toISOString().split('T')[0];
+  const timestamp = new Date().toISOString();
   const actionList = actions.map(a => `- ${a}`).join('\n');
-  return `🤖 **CEZAR update** — ${date}\n\n${actionList}`;
+  return `🤖 **CEZAR update** — ${timestamp}\n\n${actionList}`;
 }
 
 /**
@@ -15,9 +15,9 @@ export function formatAuditComment(actions: string[]): string {
  * Use this when the action already posts content (e.g. missing-info request).
  */
 export function withAuditFooter(body: string, actions: string[]): string {
-  const date = new Date().toISOString().split('T')[0];
+  const timestamp = new Date().toISOString();
   const actionList = actions.map(a => `- ${a}`).join('\n');
-  return `${body}\n\n---\n🤖 **CEZAR update** — ${date}\n\n${actionList}`;
+  return `${body}\n\n---\n🤖 **CEZAR update** — ${timestamp}\n\n${actionList}`;
 }
 
 /**
