@@ -57,6 +57,17 @@ export const IssueAnalysisSchema = z.object({
 
   // Contributor welcome action
   welcomeCommentPostedAt: z.string().nullable().default(null),
+
+  // Done detector action
+  doneDetected: z.boolean().nullable().default(null),
+  doneConfidence: z.number().min(0).max(1).nullable().default(null),
+  doneReason: z.string().nullable().default(null),
+  doneDraftComment: z.string().nullable().default(null),
+  doneMergedPRs: z.array(z.object({
+    prNumber: z.number(),
+    prTitle: z.string(),
+  })).nullable().default(null),
+  doneAnalyzedAt: z.string().nullable().default(null),
 });
 
 export type IssueAnalysis = z.infer<typeof IssueAnalysisSchema>;

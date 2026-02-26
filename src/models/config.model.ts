@@ -30,6 +30,7 @@ export const ConfigSchema = z.object({
     securityBatchSize: z.number().default(20),
     staleDaysThreshold: z.number().default(90),
     staleCloseDays: z.number().default(14),
+    doneDetectorBatchSize: z.number().default(10),
   }).default({}),
 });
 

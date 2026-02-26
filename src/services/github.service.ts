@@ -17,6 +17,13 @@ export interface RawIssue {
   reactions: number;
 }
 
+export interface TimelineCrossReference {
+  prNumber: number;
+  prTitle: string;
+  prUrl: string;
+  merged: boolean;
+}
+
 export class GitHubService {
   private octokit: Octokit;
   private owner: string;
@@ -195,6 +202,47 @@ export class GitHubService {
         body: c.body ?? '',
         createdAt: c.created_at,
       }));
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async getIssueTimeline(issueNumber: number): Promise<TimelineCrossReference[]> {
+    try {
+      const events = await this.octokit.paginate(this.octokit.rest.issues.listEventsForTimeline, {
+        owner: this.owner,
+        repo: this.repo,
+        issue_number: issueNumber,
+        per_page: 100,
+      });
+
+      const crossRefs: TimelineCrossReference[] = [];
+      for (const event of events) {
+        const e = event as Record<string, unknown>;
+        if (e.event !== 'cross-referenced') continue;
+
+        const source = e.source as Record<string, unknown> | undefined;
+        if (!source) continue;
+
+        const issue = source.issue as Record<string, unknown> | undefined;
+        if (!issue) continue;
+
+        const pr = issue.pull_request as Record<string, unknown> | undefined;
+        if (!pr) continue; // not a PR reference
+
+        const merged = pr.merged_at != null;
+        if (!merged) continue; // only include merged PRs
+
+        crossRefs.push({
+          prNumber: issue.number as number,
+          prTitle: issue.title as string,
+          prUrl: issue.html_url as string,
+          merged,
+        });
+      }
+
+      return crossRefs;
     } catch (error) {
       this.handleError(error);
       throw error;
