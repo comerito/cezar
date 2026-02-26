@@ -4,40 +4,44 @@ import { clearScreen, renderLogo } from './logo.js';
 import { renderStatusBox } from './status.js';
 import { actionRegistry } from '../actions/registry.js';
 import type { ActionDefinition } from '../actions/action.interface.js';
-import type { IssueStore } from '../store/store.js';
+import { IssueStore } from '../store/store.js';
 import type { Config } from '../models/config.model.js';
 import { syncCommand } from '../commands/sync.js';
 
 export async function launchHub(store: IssueStore | null, config: Config): Promise<void> {
-  clearScreen();
-  renderLogo();
-  renderStatusBox(store);
+  while (true) {
+    clearScreen();
+    renderLogo();
+    renderStatusBox(store);
 
-  const choices = buildChoices(store);
+    const choices = buildChoices(store);
 
-  const selected = await select({
-    message: 'What would you like to do?',
-    choices,
-    pageSize: 10,
-  });
+    const selected = await select({
+      message: 'What would you like to do?',
+      choices,
+      pageSize: 10,
+    });
 
-  if (selected === 'exit') return;
+    if (selected === 'exit') return;
 
-  if (selected === 'sync') {
-    await syncCommand({}, config);
-    return;
+    if (selected === 'sync') {
+      await syncCommand({}, config);
+      // Reload store after sync to pick up new data
+      store = await IssueStore.loadOrNull(config.store.path);
+      continue;
+    }
+
+    // selected is an action id — look it up and run it
+    if (!store) {
+      console.error(chalk.red("Store not found. Run 'cezar init' first."));
+      continue;
+    }
+
+    const action = actionRegistry.get(selected);
+    if (!action) continue;
+
+    await action.run({ store, config, interactive: true, options: {} });
   }
-
-  // selected is an action id — look it up and run it
-  if (!store) {
-    console.error(chalk.red("Store not found. Run 'cezar init' first."));
-    return;
-  }
-
-  const action = actionRegistry.get(selected);
-  if (!action) return;
-
-  await action.run({ store, config, interactive: true, options: {} });
 }
 
 interface SelectChoice {
