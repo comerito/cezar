@@ -3,6 +3,14 @@
 **Cezar brings order to chaotic GitHub backlogs.** Sync issues locally, let Claude analyze them, then triage through a clean interactive CLI. Find duplicates first — more actions coming. Built for maintainers who'd rather ship than sort.
 
 ```
+   ·  ██████╗  ███████╗ ███████╗  █████╗  ██████╗  ·
+   · ██╔════╝  ██╔════╝ ╚══███╔╝ ██╔══██╗ ██╔══██╗ ·
+   · ██║       █████╗     ███╔╝  ███████║ ██████╔╝ ·
+   · ██║       ██╔══╝    ███╔╝   ██╔══██║ ██╔══██╗ ·
+   · ╚██████╗  ███████╗ ███████╗ ██║  ██║ ██║  ██║ ·
+   ·  ╚═════╝  ╚══════╝ ╚══════╝ ╚═╝  ╚═╝ ╚═╝  ╚═╝ ·
+           AI-powered GitHub issue management
+
 ┌──────────────────────────────────────────────────┐
 │  🗂  Cezar   your-org/your-repo                    │
 │  143 open · 45 closed · synced 2 hours ago        │
@@ -20,9 +28,9 @@
 
 - **Offline-first** — issues live in a local JSON store after the initial fetch. No repeated API calls.
 - **AI-powered digests** — Claude generates compact summaries so duplicate detection works on meaning, not keywords.
-- **Interactive by default, scriptable by flag** — a friendly TUI for humans, `--no-interactive` for CI.
+- **Interactive by default** — a guided TUI handles everything: setup, sync, analysis, and review.
 - **Plugin architecture** — every analysis action is a self-contained module. Adding a new one means creating a folder.
-- **Incremental** — `sync` only fetches what changed. Actions only process unanalyzed issues.
+- **Incremental** — sync only fetches what changed. Actions only process unanalyzed issues.
 
 ## Requirements
 
@@ -33,7 +41,6 @@
 ## Installation
 
 ```bash
-# Clone and install
 git clone https://github.com/comerito/cezar.git
 cd cezar
 npm install
@@ -44,73 +51,63 @@ npm link
 ## Quick Start
 
 ```bash
-# Set your tokens (or create a .env file — see .env.example)
+# Set your tokens
 cp .env.example .env
 # Edit .env with your real tokens
 
-# Initialize — fetches all issues and generates AI digests
-cezar init -o your-org -r your-repo
-
-# Launch the interactive hub
+# Launch Cezar
 cezar
 ```
 
-## Commands
+That's it. On first launch Cezar walks you through a setup wizard — enter your org and repo, and it handles the rest: fetching issues, generating AI digests, and dropping you into the interactive hub.
 
-### `cezar init`
+```
+  Welcome! Let's connect to your GitHub repo.
 
-Fetches all issues from a GitHub repo, stores them locally, and generates AI digests for each.
+? GitHub owner (org or username): your-org
+? Repository name: your-repo
+? Include closed issues? No
 
-```bash
-cezar init -o <owner> -r <repo> [options]
+✔ Fetched 143 issues from your-org/your-repo
+  143 issues stored
+✔ Digested 143/143 issues
+  Categories: 71 bugs · 38 features · 14 docs · 20 others
+
+  Setup complete!
 ```
 
-| Flag | Description |
-|------|-------------|
-| `-o, --owner` | GitHub repository owner |
-| `-r, --repo` | GitHub repository name |
-| `-t, --token` | GitHub token (or set `GITHUB_TOKEN`) |
-| `--include-closed` | Include closed issues |
-| `--no-digest` | Skip AI digest generation |
-| `--force` | Reinitialize even if a store already exists |
+From the hub you can sync with GitHub, run duplicate detection, and review results — all without leaving the app.
 
-### `cezar sync`
+## How It Works
 
-Pulls new and updated issues since the last sync. Only re-digests issues whose content changed.
+Cezar operates in three phases, all driven from the interactive hub:
 
-```bash
-cezar sync [options]
+1. **Fetch** — on setup (or when you choose "Sync with GitHub"), Cezar pulls issues from the GitHub API into a local JSON store.
+2. **Digest** — Claude generates a compact summary for each issue (~80 tokens), including category, affected area, and keywords. A progress bar tracks batch processing in real time.
+3. **Analyze** — actions like duplicate detection run against the digests, not raw issue bodies. This makes analysis fast and token-efficient.
+
+### Duplicate Detection
+
+Choose "Find Duplicates" from the hub. Cezar sends compact digests to Claude in batches — with 200 issues, the full knowledge base fits in ~16k tokens. Results are persisted per-batch, so even if interrupted, partial progress is saved.
+
+Each duplicate group is presented for interactive review:
+
 ```
+GROUP 1 of 8 ──────────────────────────────────────────
 
-| Flag | Description |
-|------|-------------|
-| `-t, --token` | GitHub token override |
-| `--include-closed` | Include closed issues |
+  ORIGINAL   #12   Login page crashes on Safari iOS
+  DUPLICATE  #89   App broken on iPhone — can't log in
 
-### `cezar status`
+  Confidence: 94%
+  Reason: Both describe Safari iOS login failure; #89 adds no new info.
 
-Prints a summary of the local store — issue counts, digest coverage, analysis state.
-
-### `cezar run <action>`
-
-Runs an analysis action in non-interactive mode. Currently available: `duplicates`.
-
-```bash
-cezar run duplicates [options]
+? What do you want to do with #89?
+❯ Mark as duplicate in store only (no GitHub change)
+  Mark as duplicate + add 'duplicate' label on GitHub
+  Skip — not a duplicate
+  Open both in browser to compare
+  Stop reviewing (keep decisions so far)
 ```
-
-| Flag | Description |
-|------|-------------|
-| `--state <state>` | Filter by `open`, `closed`, or `all` (default: `open`) |
-| `--recheck` | Re-analyze already-analyzed issues |
-| `--apply` | Apply results to GitHub immediately |
-| `--dry-run` | Preview changes without writing |
-| `--format <fmt>` | Output as `table`, `json`, or `markdown` |
-| `--no-interactive` | Skip all prompts (CI mode) |
-
-### `cezar` (no arguments)
-
-Launches the interactive hub — a menu-driven interface with dynamic badges showing pending work.
 
 ## Configuration
 
@@ -146,46 +143,17 @@ Example `.issuemanagerrc.json`:
 
 Cezar automatically loads a `.env` file from the project root. You can also export `GITHUB_TOKEN` and `ANTHROPIC_API_KEY` in your shell — environment variables override config file values.
 
-## How It Works
+## CI / Scripting
 
-Cezar operates in three phases:
-
-1. **Fetch** — `init` or `sync` pulls issues from the GitHub API into a local JSON store (`.issue-store/store.json`).
-2. **Digest** — Claude generates a compact summary for each issue (~80 tokens), including category, affected area, and keywords.
-3. **Analyze** — Actions like duplicate detection run against the digests, not raw issue bodies. This makes analysis fast and token-efficient.
-
-### Duplicate Detection
-
-The duplicate finder sends compact digests to Claude in batches. With 200 issues, the full knowledge base fits in ~16k tokens — a single API call. Results are persisted per-batch, so even if the process is interrupted, partial progress is saved.
-
-In interactive mode, each duplicate group is presented for review:
-
-```
-GROUP 1 of 8 ──────────────────────────────────────────
-
-  ORIGINAL   #12   Login page crashes on Safari iOS
-  DUPLICATE  #89   App broken on iPhone — can't log in
-
-  Confidence: 94%
-  Reason: Both describe Safari iOS login failure; #89 adds no new info.
-
-? What do you want to do with #89?
-❯ Mark as duplicate in store only (no GitHub change)
-  Mark as duplicate + add 'duplicate' label on GitHub
-  Skip — not a duplicate
-  Open both in browser to compare
-  Stop reviewing (keep decisions so far)
-```
-
-### CI Usage
-
-Every command works without a TTY:
+For automated pipelines, Cezar exposes direct commands that bypass the interactive UI:
 
 ```bash
-# In a GitHub Actions workflow
-cezar sync
+cezar init -o <owner> -r <repo>          # Bootstrap without the wizard
+cezar sync                                # Incremental fetch
 cezar run duplicates --apply --no-interactive --format json > duplicates.json
 ```
+
+See `cezar --help` for the full flag reference.
 
 ## Project Structure
 
@@ -209,6 +177,7 @@ src/
 │       └── index.ts              # Registers the action
 ├── ui/
 │   ├── hub.ts                    # Interactive menu
+│   ├── setup.ts                  # First-run setup wizard
 │   ├── status.ts                 # Status box renderer
 │   └── components/               # Reusable UI primitives
 └── utils/                        # Config, hashing, chunking, formatting
