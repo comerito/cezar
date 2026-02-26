@@ -1,0 +1,19 @@
+{
+  "github": {
+    "owner": "your-org",
+    "repo": "your-repo"
+  },
+  "llm": {
+    "model": "claude-sonnet-4-20250514",
+    "maxTokens": 4096
+  },
+  "store": {
+    "path": ".issue-store"
+  },
+  "sync": {
+    "digestBatchSize": 20,
+    "duplicateBatchSize": 30,
+    "minDuplicateConfidence": 0.80,
+    "includeClosed": false
+  }
+}
