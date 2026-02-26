@@ -1,9 +1,16 @@
 #!/usr/bin/env node
 import { Command } from 'commander';
+import chalk from 'chalk';
 import { loadConfig } from './utils/config.js';
 import { initCommand } from './commands/init.js';
 import { syncCommand } from './commands/sync.js';
 import { statusCommand } from './commands/status.js';
+import { runCommand } from './commands/run.js';
+import { launchHub } from './ui/hub.js';
+import { IssueStore } from './store/store.js';
+
+// Register all actions (side-effect imports)
+import './actions/duplicates/index.js';
 
 const program = new Command()
   .name('issue-manager')
@@ -45,10 +52,35 @@ program.command('status')
     await statusCommand(config);
   });
 
-// Default action (no subcommand) — placeholder until hub is built
+program.command('run <action>')
+  .description('Run an analysis action')
+  .option('--state <state>', 'open|closed|all', 'open')
+  .option('--recheck', 'Re-analyze already-analyzed issues')
+  .option('--apply', 'Apply results to GitHub immediately')
+  .option('--dry-run', 'Show what would happen without writing')
+  .option('--format <format>', 'table|json|markdown', 'table')
+  .option('--no-interactive', 'Force non-interactive mode')
+  .action(async (actionId, opts) => {
+    const config = await loadConfig();
+    await runCommand(actionId, opts, config);
+  });
+
+// No subcommand → launch interactive hub
 program.action(async () => {
-  const config = await loadConfig();
-  await statusCommand(config);
+  try {
+    const config = await loadConfig();
+    const store = await IssueStore.loadOrNull(config.store.path);
+    await launchHub(store, config);
+  } catch (error) {
+    if ((error as Error).name === 'ExitPromptError') {
+      // User cancelled with Ctrl+C
+      process.exit(0);
+    }
+    throw error;
+  }
 });
 
-program.parse();
+program.parseAsync().catch((error) => {
+  console.error(chalk.red((error as Error).message));
+  process.exit(1);
+});
