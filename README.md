@@ -46,9 +46,10 @@
 
 - **Offline-first** — issues live in a local JSON store after the initial fetch. No repeated API calls.
 - **AI-powered digests** — Claude generates compact summaries so analysis works on meaning, not keywords.
+- **Comment-aware** — actions see the full conversation, not just the issue body. No more false positives from ignoring follow-up comments.
 - **Interactive by default** — a guided TUI handles everything: setup, sync, analysis, and review.
 - **Plugin architecture** — every analysis action is a self-contained module. Adding a new one means creating a folder.
-- **Incremental** — sync only fetches what changed. Actions only process unanalyzed issues.
+- **Incremental** — sync only fetches what changed. Actions only process unanalyzed issues. New comments automatically trigger re-analysis.
 - **CI-ready** — every action works non-interactively with `--no-interactive`, `--apply`, and `--dry-run` flags.
 
 ## Requirements
@@ -142,12 +143,25 @@ Every action follows the same interactive review pattern: analyze, present resul
 Cezar operates in three phases, all driven from the interactive hub:
 
 1. **Fetch** — on setup (or when you choose "Sync with GitHub"), Cezar pulls issues from the GitHub API into a local JSON store.
-2. **Digest** — Claude generates a compact summary for each issue (~80 tokens), including category, affected area, and keywords.
-3. **Analyze** — actions run against the digests (or directly against GitHub data for non-AI actions like Claim Detector). Results are persisted per-batch, so even if interrupted, partial progress is saved.
+2. **Digest & Comments** — Claude generates a compact summary for each issue (~80 tokens), including category, affected area, and keywords. Comments are fetched and stored for issues that have them.
+3. **Analyze** — actions run against the digests and comments. Results are persisted per-batch, so even if interrupted, partial progress is saved. When new comments arrive on a previously analyzed issue, it's automatically queued for re-analysis.
+
+### Comment-Aware Analysis
+
+Most issue managers only look at the title and body. Cezar stores and feeds issue comments into action prompts, which eliminates common false positives:
+
+- **missing-info** won't flag an issue when the author already provided repro steps in a comment
+- **duplicates** respects maintainer comments clarifying "not a duplicate"
+- **stale** recognizes active comment discussions and avoids suggesting closure
+- **priority** uses comment discussion to gauge urgency and affected user count
+- **security** checks comments for CVE references and severity clarifications
+- **claim-detector** reads stored comments directly instead of making per-issue API calls
+
+Comments are fetched incrementally during sync — only issues with new or changed comments trigger API calls.
 
 ### Example: Duplicate Detection
 
-Choose "Find Duplicates" from the hub. Cezar sends compact digests to Claude in batches — with 200 issues, the full knowledge base fits in ~16k tokens.
+Choose "Find Duplicates" from the hub. Cezar sends compact digests and recent comments to Claude in batches — with 200 issues, the full knowledge base fits in ~16k tokens.
 
 Each duplicate group is presented for interactive review:
 
