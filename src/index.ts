@@ -8,6 +8,7 @@ import { statusCommand } from './commands/status.js';
 import { runCommand } from './commands/run.js';
 import { launchHub } from './ui/hub.js';
 import { IssueStore } from './store/store.js';
+import { VERSION } from './utils/version.js';
 
 // Register all actions (side-effect imports)
 import './actions/duplicates/index.js';
@@ -28,7 +29,7 @@ import './actions/claim-detector/index.js';
 const program = new Command()
   .name('cezar')
   .description('AI-powered GitHub issue management')
-  .version('0.1.0');
+  .version(VERSION);
 
 program.command('init')
   .description('Fetch all issues and generate digests')

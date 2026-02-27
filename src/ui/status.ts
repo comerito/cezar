@@ -1,12 +1,13 @@
 import boxen from 'boxen';
 import chalk from 'chalk';
 import type { IssueStore } from '../store/store.js';
+import { VERSION } from '../utils/version.js';
 
 export function renderStatusBox(store: IssueStore | null): void {
   if (!store) {
     const box = boxen(
       chalk.yellow('No store found. Run `cezar init` to get started.'),
-      { padding: 1, borderColor: 'yellow', title: 'Cezar', titleAlignment: 'left' },
+      { padding: 1, borderColor: 'yellow', title: ` Cezar v${VERSION} `, titleAlignment: 'left' },
     );
     console.log(box);
     return;
@@ -36,7 +37,7 @@ export function renderStatusBox(store: IssueStore | null): void {
   const box = boxen(lines.join('\n'), {
     padding: 1,
     borderColor: 'cyan',
-    title: '🗂  Cezar ',
+    title: ` Cezar v${VERSION} `,
     titleAlignment: 'left',
   });
 
