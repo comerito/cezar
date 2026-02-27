@@ -73,9 +73,15 @@ export class RecurringQuestionRunner {
     const allQuestions = this.store.getIssues({ state, hasDigest: true })
       .filter(i => i.digest?.category === 'question');
 
+    const unanalyzed = allQuestions.filter(i => i.analysis.recurringAnalyzedAt === null);
+    const commentUpdated = allQuestions.filter(i =>
+      i.analysis.recurringAnalyzedAt !== null &&
+      i.commentsFetchedAt !== null &&
+      i.commentsFetchedAt > i.analysis.recurringAnalyzedAt,
+    );
     const candidates = options.recheck
       ? allQuestions
-      : allQuestions.filter(i => i.analysis.recurringAnalyzedAt === null);
+      : [...unanalyzed, ...commentUpdated];
 
     if (candidates.length === 0) {
       return RecurringQuestionResults.empty('All questions already checked. Use --recheck to re-run.');

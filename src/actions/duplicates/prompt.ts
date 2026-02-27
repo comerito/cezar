@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { StoredIssue } from '../../store/store.model.js';
+import { formatCommentsForPrompt } from '../../utils/comment-formatter.js';
 
 export const DuplicateResponseSchema = z.object({
   duplicates: z.array(z.object({
@@ -29,6 +30,7 @@ Rules:
 - Only include candidates that ARE duplicates (omit non-duplicates entirely)
 - Minimum confidence to include: 0.80
 - If unsure, omit rather than guess
+- If comments explicitly state this is NOT a duplicate or clarify that it's a distinct issue, omit it from results
 
 Respond ONLY with valid JSON — no markdown, no explanation:
 {
@@ -45,5 +47,11 @@ Respond ONLY with valid JSON — no markdown, no explanation:
 
 export function formatCompact(issue: StoredIssue): string {
   const d = issue.digest!;
-  return `#${issue.number} [${d.category}] ${d.affectedArea} | ${d.summary} | kw: ${d.keywords.join(', ')}`;
+  const commentSummary = formatCommentsForPrompt(issue.comments, {
+    maxComments: 3,
+    maxCharsPerComment: 200,
+    maxTotalChars: 800,
+  });
+  const base = `#${issue.number} [${d.category}] ${d.affectedArea} | ${d.summary} | kw: ${d.keywords.join(', ')}`;
+  return commentSummary ? `${base}\n${commentSummary}` : base;
 }

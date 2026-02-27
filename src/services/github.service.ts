@@ -204,6 +204,23 @@ export class GitHubService {
     }
   }
 
+  async fetchCommentsForIssues(
+    issueNumbers: number[],
+    onProgress?: (done: number, total: number) => void,
+  ): Promise<Map<number, Array<{ author: string; body: string; createdAt: string }>>> {
+    const result = new Map<number, Array<{ author: string; body: string; createdAt: string }>>();
+    for (const [idx, num] of issueNumbers.entries()) {
+      try {
+        const comments = await this.getIssueComments(num);
+        result.set(num, comments);
+      } catch {
+        // Skip issues where comment fetch fails
+      }
+      onProgress?.(idx + 1, issueNumbers.length);
+    }
+    return result;
+  }
+
   async getIssueComments(issueNumber: number): Promise<Array<{ author: string; body: string; createdAt: string }>> {
     try {
       const comments = await this.octokit.paginate(this.octokit.rest.issues.listComments, {

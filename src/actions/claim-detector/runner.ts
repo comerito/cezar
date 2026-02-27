@@ -1,7 +1,6 @@
 import ora from 'ora';
 import type { Config } from '../../models/config.model.js';
 import { IssueStore } from '../../store/store.js';
-import { GitHubService } from '../../services/github.service.js';
 import { detectClaim, type ClaimMatch } from './patterns.js';
 
 export interface ClaimDetectorOptions {
@@ -62,12 +61,10 @@ export class ClaimDetectorResults {
 export class ClaimDetectorRunner {
   private store: IssueStore;
   private config: Config;
-  private githubService?: GitHubService;
 
-  constructor(store: IssueStore, config: Config, githubService?: GitHubService) {
+  constructor(store: IssueStore, config: Config) {
     this.store = store;
     this.config = config;
-    this.githubService = githubService;
   }
 
   async detect(options: ClaimDetectorOptions = {}): Promise<ClaimDetectorResults> {
@@ -77,72 +74,73 @@ export class ClaimDetectorRunner {
       return ClaimDetectorResults.empty('No open issues found.');
     }
 
-    // Filter to unanalyzed unless recheck
+    // Filter to unanalyzed + comment-updated unless recheck
+    const unanalyzed = openIssues.filter(i => i.analysis.claimDetectedAt === null);
+    const commentUpdated = openIssues.filter(i =>
+      i.analysis.claimDetectedAt !== null &&
+      i.commentsFetchedAt !== null &&
+      i.commentsFetchedAt > i.analysis.claimDetectedAt,
+    );
     const candidates = options.recheck
       ? openIssues
-      : openIssues.filter(i => i.analysis.claimDetectedAt === null);
+      : [...unanalyzed, ...commentUpdated];
 
     if (candidates.length === 0) {
       return ClaimDetectorResults.empty('All open issues already checked. Use --recheck to re-run.');
     }
 
     const spinner = ora(`Scanning comments for ${candidates.length} issue(s)...`).start();
-    const github = this.githubService ?? new GitHubService(this.config);
 
     const allResults: ClaimIssueResult[] = [];
 
     for (const [idx, issue] of candidates.entries()) {
       spinner.text = `Scanning comments for #${issue.number} (${idx + 1}/${candidates.length})...`;
 
-      try {
-        const comments = await github.getIssueComments(issue.number);
+      // Use stored comments instead of fetching from GitHub API
+      const comments = issue.comments;
 
-        // Scan all comments, keep the latest claim
-        let latestClaim: ClaimMatch | null = null;
-        for (const comment of comments) {
-          const claim = detectClaim(comment);
-          if (claim) {
-            // Latest claim wins (comments are in chronological order)
-            latestClaim = claim;
-          }
+      // Scan all comments, keep the latest claim
+      let latestClaim: ClaimMatch | null = null;
+      for (const comment of comments) {
+        const claim = detectClaim(comment);
+        if (claim) {
+          // Latest claim wins (comments are in chronological order)
+          latestClaim = claim;
         }
+      }
 
-        if (latestClaim) {
-          // Skip if claimant is already assigned to this issue
-          if (issue.assignees.includes(latestClaim.author)) {
-            this.store.setAnalysis(issue.number, {
-              claimDetectedBy: latestClaim.author,
-              claimComment: latestClaim.snippet,
-              claimDetectedAt: new Date().toISOString(),
-            });
-            continue;
-          }
-
+      if (latestClaim) {
+        // Skip if claimant is already assigned to this issue
+        if (issue.assignees.includes(latestClaim.author)) {
           this.store.setAnalysis(issue.number, {
             claimDetectedBy: latestClaim.author,
             claimComment: latestClaim.snippet,
             claimDetectedAt: new Date().toISOString(),
           });
-
-          allResults.push({
-            number: issue.number,
-            title: issue.title,
-            htmlUrl: issue.htmlUrl,
-            claimant: latestClaim.author,
-            snippet: latestClaim.snippet,
-            claimedAt: latestClaim.createdAt,
-          });
-        } else {
-          // No claim found — mark as analyzed
-          this.store.setAnalysis(issue.number, {
-            claimDetectedBy: null,
-            claimComment: null,
-            claimDetectedAt: new Date().toISOString(),
-          });
+          continue;
         }
-      } catch {
-        // Comment fetch failed — skip this issue silently
-        continue;
+
+        this.store.setAnalysis(issue.number, {
+          claimDetectedBy: latestClaim.author,
+          claimComment: latestClaim.snippet,
+          claimDetectedAt: new Date().toISOString(),
+        });
+
+        allResults.push({
+          number: issue.number,
+          title: issue.title,
+          htmlUrl: issue.htmlUrl,
+          claimant: latestClaim.author,
+          snippet: latestClaim.snippet,
+          claimedAt: latestClaim.createdAt,
+        });
+      } else {
+        // No claim found — mark as analyzed
+        this.store.setAnalysis(issue.number, {
+          claimDetectedBy: null,
+          claimComment: null,
+          claimDetectedAt: new Date().toISOString(),
+        });
       }
     }
 

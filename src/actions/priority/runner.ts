@@ -72,9 +72,15 @@ export class PriorityRunner {
     const state = (options.state ?? 'open') as 'open' | 'closed' | 'all';
     const allIssues = this.store.getIssues({ state, hasDigest: true });
 
+    const unanalyzed = allIssues.filter(i => i.analysis.priorityAnalyzedAt === null);
+    const commentUpdated = allIssues.filter(i =>
+      i.analysis.priorityAnalyzedAt !== null &&
+      i.commentsFetchedAt !== null &&
+      i.commentsFetchedAt > i.analysis.priorityAnalyzedAt,
+    );
     const candidates = options.recheck
       ? allIssues
-      : allIssues.filter(i => i.analysis.priorityAnalyzedAt === null);
+      : [...unanalyzed, ...commentUpdated];
 
     if (candidates.length === 0) {
       return PriorityResults.empty('All issues already scored. Use --recheck to re-run.');

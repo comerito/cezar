@@ -69,9 +69,15 @@ export class MissingInfoRunner {
     const allBugs = this.store.getIssues({ state, hasDigest: true })
       .filter(i => i.digest?.category === 'bug');
 
+    const unanalyzed = allBugs.filter(i => i.analysis.missingInfoAnalyzedAt === null);
+    const commentUpdated = allBugs.filter(i =>
+      i.analysis.missingInfoAnalyzedAt !== null &&
+      i.commentsFetchedAt !== null &&
+      i.commentsFetchedAt > i.analysis.missingInfoAnalyzedAt,
+    );
     const candidates = options.recheck
       ? allBugs
-      : allBugs.filter(i => i.analysis.missingInfoAnalyzedAt === null);
+      : [...unanalyzed, ...commentUpdated];
 
     if (candidates.length === 0) {
       return MissingInfoResults.empty('All bug reports already checked. Use --recheck to re-run.');

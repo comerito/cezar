@@ -14,7 +14,19 @@ actionRegistry.register({
     const threshold = 90; // default; actual config not available here
     const stale = store.getIssues({ state: 'open', hasDigest: true })
       .filter(i => (now - new Date(i.updatedAt).getTime()) / 86400000 >= threshold);
-    return stale.length > 0 ? `${stale.length} stale` : 'no stale issues';
+    const unanalyzed = stale.filter(i => i.analysis.staleAnalyzedAt === null).length;
+    const commentUpdated = stale.filter(i =>
+      i.analysis.staleAnalyzedAt !== null &&
+      i.commentsFetchedAt !== null &&
+      i.commentsFetchedAt > i.analysis.staleAnalyzedAt,
+    ).length;
+    const pending = unanalyzed + commentUpdated;
+    if (stale.length === 0) return 'no stale issues';
+    if (pending === 0) return `${stale.length} stale (all analyzed)`;
+    const parts = [];
+    if (unanalyzed > 0) parts.push(`${unanalyzed} unanalyzed`);
+    if (commentUpdated > 0) parts.push(`${commentUpdated} updated`);
+    return parts.join(', ');
   },
 
   isAvailable(store) {

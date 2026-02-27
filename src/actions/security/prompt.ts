@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { StoredIssue } from '../../store/store.model.js';
+import { formatCommentsForPrompt } from '../../utils/comment-formatter.js';
 
 export const SecurityResponseSchema = z.object({
   findings: z.array(z.object({
@@ -33,6 +34,7 @@ Rules:
 - Set confidence based on how clearly the issue describes a security problem (0.0-1.0)
 - Only return isSecurityRelated: true when confidence >= 0.70
 - False positives are acceptable — it's better to flag and review than to miss a vulnerability
+- Check comments for additional security context, CVE references, or severity clarifications
 - For non-security issues, set isSecurityRelated: false (category, severity, explanation can be empty)
 - Severity should reflect the potential impact if the security issue is exploited
 
@@ -57,9 +59,10 @@ Respond ONLY with valid JSON — no markdown, no explanation:
 function formatIssueForScan(issue: StoredIssue): string {
   const d = issue.digest!;
   const labels = issue.labels.length > 0 ? ` [${issue.labels.join(', ')}]` : '';
+  const commentSection = formatCommentsForPrompt(issue.comments);
   return `#${issue.number}${labels} — ${issue.title}
 Category: ${d.category} | Area: ${d.affectedArea} | Keywords: ${d.keywords.join(', ')}
 Summary: ${d.summary}
 Full body:
-${issue.body.slice(0, 4000)}`;
+${issue.body.slice(0, 4000)}${commentSection ? `\n${commentSection}` : ''}`;
 }

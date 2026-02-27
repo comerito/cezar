@@ -12,7 +12,17 @@ actionRegistry.register({
   getBadge(store) {
     const issues = store.getIssues({ state: 'open', hasDigest: true });
     const unanalyzed = issues.filter(i => i.analysis.duplicatesAnalyzedAt === null).length;
-    return unanalyzed > 0 ? `${unanalyzed} unanalyzed` : 'up to date';
+    const commentUpdated = issues.filter(i =>
+      i.analysis.duplicatesAnalyzedAt !== null &&
+      i.commentsFetchedAt !== null &&
+      i.commentsFetchedAt > i.analysis.duplicatesAnalyzedAt,
+    ).length;
+    const total = unanalyzed + commentUpdated;
+    if (total === 0) return 'up to date';
+    const parts = [];
+    if (unanalyzed > 0) parts.push(`${unanalyzed} unanalyzed`);
+    if (commentUpdated > 0) parts.push(`${commentUpdated} updated`);
+    return parts.join(', ');
   },
 
   isAvailable(store) {

@@ -87,6 +87,14 @@ export const IssueDigestSchema = z.object({
 
 export type IssueDigest = z.infer<typeof IssueDigestSchema>;
 
+export const StoredCommentSchema = z.object({
+  author: z.string(),
+  body: z.string(),
+  createdAt: z.string(),
+});
+
+export type StoredComment = z.infer<typeof StoredCommentSchema>;
+
 export const StoredIssueSchema = z.object({
   number: z.number(),
   title: z.string(),
@@ -101,6 +109,8 @@ export const StoredIssueSchema = z.object({
   contentHash: z.string(),
   commentCount: z.number().default(0),
   reactions: z.number().default(0),
+  comments: z.array(StoredCommentSchema).default([]),
+  commentsFetchedAt: z.string().nullable().default(null),
   digest: IssueDigestSchema.nullable().default(null),
   analysis: IssueAnalysisSchema.default({}),
 });

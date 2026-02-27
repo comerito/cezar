@@ -90,6 +90,30 @@ export async function syncCommand(opts: SyncOptions, config: Config): Promise<vo
     }
   }
 
+  // Fetch comments for issues with new/changed comments
+  const needsComments = store.getIssues()
+    .filter(i => i.commentCount > 0 && (i.commentsFetchedAt === null || i.comments.length !== i.commentCount));
+  if (needsComments.length > 0) {
+    const commentSpinner = ora(`Fetching comments  ${progressBar(0, needsComments.length)}`).start();
+    try {
+      const commentMap = await github.fetchCommentsForIssues(
+        needsComments.map(i => i.number),
+        (done, total) => { commentSpinner.text = `Fetching comments  ${progressBar(done, total)}`; },
+      );
+      let commentCount = 0;
+      for (const [number, comments] of commentMap) {
+        store.setComments(number, comments);
+        commentCount++;
+      }
+      await store.save();
+      commentSpinner.succeed(`Fetched comments for ${commentCount} issue(s)`);
+    } catch (error) {
+      commentSpinner.warn('Comment fetching failed (partial results saved)');
+      console.error(chalk.yellow((error as Error).message));
+      await store.save();
+    }
+  }
+
   // Summary
   const unanalyzed = store.getIssues({ state: 'open', hasDigest: true })
     .filter(i => i.analysis.duplicatesAnalyzedAt === null).length;

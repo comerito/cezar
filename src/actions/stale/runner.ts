@@ -104,10 +104,16 @@ export class StaleRunner {
       return StaleResults.empty(`No issues inactive for ${threshold}+ days.`);
     }
 
-    // Filter to unanalyzed unless recheck
+    // Filter to unanalyzed + comment-updated unless recheck
+    const unanalyzed = staleIssues.filter(i => i.analysis.staleAnalyzedAt === null);
+    const commentUpdated = staleIssues.filter(i =>
+      i.analysis.staleAnalyzedAt !== null &&
+      i.commentsFetchedAt !== null &&
+      i.commentsFetchedAt > i.analysis.staleAnalyzedAt,
+    );
     const candidates = options.recheck
       ? staleIssues
-      : staleIssues.filter(i => i.analysis.staleAnalyzedAt === null);
+      : [...unanalyzed, ...commentUpdated];
 
     if (candidates.length === 0) {
       return StaleResults.empty('All stale issues already analyzed. Use --recheck to re-run.');

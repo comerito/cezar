@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { StoredIssue } from '../../store/store.model.js';
+import { formatCommentsForPrompt } from '../../utils/comment-formatter.js';
 
 export const MissingInfoResponseSchema = z.object({
   results: z.array(z.object({
@@ -26,6 +27,7 @@ For each bug report below, determine what information is missing. Be context-awa
 - All bugs need: steps to reproduce, expected vs actual behavior
 
 If the issue already contains sufficient information to investigate, set hasMissingInfo to false.
+- IMPORTANT: Check if the missing information was already provided in the comments below. If the comments already contain the needed info (e.g., reproduction steps, version, error message), set hasMissingInfo to false.
 
 For issues with missing info, write a polite, specific GitHub comment asking for exactly what is needed. Do NOT use a generic template — tailor the questions to what this specific issue is about. Keep comments concise (3-5 bullet points max).
 
@@ -48,8 +50,9 @@ Respond ONLY with valid JSON — no markdown, no explanation:
 function formatIssueForAnalysis(issue: StoredIssue): string {
   const d = issue.digest!;
   const labels = issue.labels.length > 0 ? ` [${issue.labels.join(', ')}]` : '';
+  const commentSection = formatCommentsForPrompt(issue.comments);
   return `#${issue.number}${labels} — ${issue.title}
 Category: ${d.category} | Area: ${d.affectedArea}
 Body:
-${issue.body.slice(0, 3000)}`;
+${issue.body.slice(0, 3000)}${commentSection ? `\n${commentSection}` : ''}`;
 }

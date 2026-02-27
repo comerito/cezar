@@ -80,10 +80,16 @@ export class DuplicatesRunner {
     const state = (options.state ?? 'open') as 'open' | 'closed' | 'all';
     const allIssues = this.store.getIssues({ state, hasDigest: true });
 
-    // Candidates = unanalyzed issues (or all if --recheck)
+    // Candidates = unanalyzed issues + comment-updated issues (or all if --recheck)
+    const unanalyzed = allIssues.filter(i => i.analysis.duplicatesAnalyzedAt === null);
+    const commentUpdated = allIssues.filter(i =>
+      i.analysis.duplicatesAnalyzedAt !== null &&
+      i.commentsFetchedAt !== null &&
+      i.commentsFetchedAt > i.analysis.duplicatesAnalyzedAt,
+    );
     const candidates = options.recheck
       ? allIssues
-      : allIssues.filter(i => i.analysis.duplicatesAnalyzedAt === null);
+      : [...unanalyzed, ...commentUpdated];
 
     if (candidates.length === 0) {
       return DuplicateResults.empty('All issues already analyzed. Use --recheck to re-run.');

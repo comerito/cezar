@@ -1,7 +1,7 @@
 import { readFile, writeFile, rename, mkdir, unlink } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
-import { StoreSchema, StoredIssueSchema, IssueAnalysisSchema, type Store, type StoredIssue, type IssueAnalysis, type IssueDigest, type StoreMeta } from './store.model.js';
+import { StoreSchema, StoredIssueSchema, IssueAnalysisSchema, type Store, type StoredIssue, type StoredComment, type IssueAnalysis, type IssueDigest, type StoreMeta } from './store.model.js';
 
 export interface IssueFilter {
   state?: 'open' | 'closed' | 'all';
@@ -64,7 +64,7 @@ export class IssueStore {
     }
   }
 
-  upsertIssue(issue: Omit<StoredIssue, 'digest' | 'analysis'>): { action: 'created' | 'updated' | 'unchanged'; stateChanged?: boolean } {
+  upsertIssue(issue: Omit<StoredIssue, 'digest' | 'analysis' | 'comments' | 'commentsFetchedAt'>): { action: 'created' | 'updated' | 'unchanged'; stateChanged?: boolean } {
     const existing = this.data.issues.find(i => i.number === issue.number);
     if (!existing) {
       const full = StoredIssueSchema.parse({ ...issue, digest: null, analysis: {} });
@@ -73,6 +73,7 @@ export class IssueStore {
     }
 
     const stateChanged = existing.state !== issue.state;
+    const commentCountChanged = existing.commentCount !== issue.commentCount;
 
     if (existing.contentHash !== issue.contentHash) {
       existing.title = issue.title;
@@ -87,21 +88,36 @@ export class IssueStore {
       existing.reactions = issue.reactions;
       // Clear digest when content changes — needs re-digesting
       existing.digest = null;
+      // Invalidate comments when comment count changes
+      if (commentCountChanged) {
+        existing.commentsFetchedAt = null;
+      }
       return { action: 'updated', stateChanged };
     }
 
     // Update mutable fields that don't affect content hash
     existing.state = issue.state;
     existing.labels = issue.labels;
+    // Invalidate comments when comment count changes
+    if (commentCountChanged) {
+      existing.commentsFetchedAt = null;
+    }
     existing.commentCount = issue.commentCount;
     existing.reactions = issue.reactions;
-    return { action: stateChanged ? 'updated' : 'unchanged', stateChanged };
+    return { action: stateChanged || commentCountChanged ? 'updated' : 'unchanged', stateChanged };
   }
 
   setDigest(issueNumber: number, digest: IssueDigest): void {
     const issue = this.data.issues.find(i => i.number === issueNumber);
     if (!issue) throw new Error(`Issue #${issueNumber} not found in store`);
     issue.digest = digest;
+  }
+
+  setComments(issueNumber: number, comments: StoredComment[]): void {
+    const issue = this.data.issues.find(i => i.number === issueNumber);
+    if (!issue) throw new Error(`Issue #${issueNumber} not found in store`);
+    issue.comments = comments;
+    issue.commentsFetchedAt = new Date().toISOString();
   }
 
   setAnalysis(issueNumber: number, analysis: Partial<IssueAnalysis>): void {

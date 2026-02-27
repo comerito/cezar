@@ -74,9 +74,15 @@ export class SecurityRunner {
     // Security scans ALL categories — not just bugs
     const allIssues = this.store.getIssues({ state, hasDigest: true });
 
+    const unanalyzed = allIssues.filter(i => i.analysis.securityAnalyzedAt === null);
+    const commentUpdated = allIssues.filter(i =>
+      i.analysis.securityAnalyzedAt !== null &&
+      i.commentsFetchedAt !== null &&
+      i.commentsFetchedAt > i.analysis.securityAnalyzedAt,
+    );
     const candidates = options.recheck
       ? allIssues
-      : allIssues.filter(i => i.analysis.securityAnalyzedAt === null);
+      : [...unanalyzed, ...commentUpdated];
 
     if (candidates.length === 0) {
       return SecurityResults.empty('All issues already scanned. Use --recheck to re-run.');

@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { StoredIssue } from '../../store/store.model.js';
+import { formatCommentsForPrompt } from '../../utils/comment-formatter.js';
 
 export const RecurringQuestionResponseSchema = z.object({
   questions: z.array(z.object({
@@ -30,6 +31,7 @@ Rules:
 - Summarize what the closed issue covers so the user gets immediate value
 - If no match exists, set isRecurring to false with an empty similarClosedIssues array
 - Confidence should reflect how well the closed issue(s) answer the open question
+- If the question was already answered in the comments below, set isRecurring to false — no need to redirect to a closed issue
 
 OPEN QUESTIONS:
 ${candidateList}
@@ -50,11 +52,12 @@ Respond ONLY with valid JSON — no markdown, no explanation:
 
 function formatCandidate(issue: StoredIssue): string {
   const d = issue.digest!;
+  const commentSection = formatCommentsForPrompt(issue.comments);
   return `#${issue.number} — ${issue.title}
 Area: ${d.affectedArea} | Keywords: ${d.keywords.join(', ')}
 Summary: ${d.summary}
 Body:
-${issue.body.slice(0, 2000)}`;
+${issue.body.slice(0, 2000)}${commentSection ? `\n${commentSection}` : ''}`;
 }
 
 function formatClosedIssue(issue: StoredIssue): string {

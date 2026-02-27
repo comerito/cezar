@@ -11,8 +11,19 @@ actionRegistry.register({
 
   getBadge(store) {
     const bugs = store.getIssues({ state: 'open', hasDigest: true })
-      .filter(i => i.digest?.category === 'bug' && i.analysis.missingInfoAnalyzedAt === null);
-    return bugs.length > 0 ? `${bugs.length} unchecked bugs` : 'up to date';
+      .filter(i => i.digest?.category === 'bug');
+    const unchecked = bugs.filter(i => i.analysis.missingInfoAnalyzedAt === null).length;
+    const commentUpdated = bugs.filter(i =>
+      i.analysis.missingInfoAnalyzedAt !== null &&
+      i.commentsFetchedAt !== null &&
+      i.commentsFetchedAt > i.analysis.missingInfoAnalyzedAt,
+    ).length;
+    const total = unchecked + commentUpdated;
+    if (total === 0) return 'up to date';
+    const parts = [];
+    if (unchecked > 0) parts.push(`${unchecked} unchecked`);
+    if (commentUpdated > 0) parts.push(`${commentUpdated} updated`);
+    return parts.join(', ');
   },
 
   isAvailable(store) {

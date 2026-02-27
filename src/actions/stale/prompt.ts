@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import type { StoredIssue } from '../../store/store.model.js';
+import { formatCommentsForPrompt } from '../../utils/comment-formatter.js';
 
 export const StaleAnalysisResponseSchema = z.object({
   results: z.array(z.object({
@@ -39,6 +40,7 @@ DECISION GUIDELINES BY CATEGORY:
 
 Rules:
 - Be conservative — when in doubt, prefer "label-stale" over closing
+- If recent comments show active discussion or someone working on the issue, prefer "keep-open"
 - Draft comments should be polite and explain the reasoning
 - For "keep-open", set draftComment to an empty string
 - Reference related closed issues by number when relevant
@@ -62,10 +64,15 @@ Respond ONLY with valid JSON — no markdown, no explanation:
 function formatCandidate(issue: StoredIssue & { daysSinceUpdate: number }): string {
   const d = issue.digest!;
   const labels = issue.labels.length > 0 ? ` [${issue.labels.join(', ')}]` : '';
+  const commentSection = formatCommentsForPrompt(issue.comments, {
+    maxComments: 5,
+    maxCharsPerComment: 300,
+    maxTotalChars: 2000,
+  });
   return `#${issue.number}${labels} — ${issue.title}
 Category: ${d.category} | Area: ${d.affectedArea} | Days inactive: ${issue.daysSinceUpdate}
 Summary: ${d.summary}
-Comments: ${issue.commentCount} | Reactions: ${issue.reactions}`;
+Comments: ${issue.commentCount} | Reactions: ${issue.reactions}${commentSection ? `\n${commentSection}` : ''}`;
 }
 
 function formatClosed(issue: StoredIssue): string {
