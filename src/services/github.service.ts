@@ -15,6 +15,7 @@ export interface RawIssue {
   contentHash: string;
   commentCount: number;
   reactions: number;
+  assignees: string[];
 }
 
 export interface TimelineCrossReference {
@@ -271,6 +272,7 @@ export class GitHubService {
       state: string;
       labels: Array<{ name?: string } | string>;
       user: { login: string } | null;
+      assignees?: Array<{ login: string }>;
       created_at: string;
       updated_at: string;
       html_url: string;
@@ -294,6 +296,7 @@ export class GitHubService {
       contentHash: contentHash(title, body),
       commentCount: issue.comments ?? 0,
       reactions: issue.reactions?.total_count ?? 0,
+      assignees: issue.assignees?.map(a => a.login) ?? [],
     };
   }
 

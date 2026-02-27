@@ -108,6 +108,16 @@ export class ClaimDetectorRunner {
         }
 
         if (latestClaim) {
+          // Skip if claimant is already assigned to this issue
+          if (issue.assignees.includes(latestClaim.author)) {
+            this.store.setAnalysis(issue.number, {
+              claimDetectedBy: latestClaim.author,
+              claimComment: latestClaim.snippet,
+              claimDetectedAt: new Date().toISOString(),
+            });
+            continue;
+          }
+
           this.store.setAnalysis(issue.number, {
             claimDetectedBy: latestClaim.author,
             claimComment: latestClaim.snippet,

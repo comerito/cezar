@@ -93,6 +93,7 @@ export const StoredIssueSchema = z.object({
   body: z.string(),
   state: z.enum(['open', 'closed']),
   labels: z.array(z.string()),
+  assignees: z.array(z.string()).default([]),
   author: z.string(),
   createdAt: z.string(),
   updatedAt: z.string(),

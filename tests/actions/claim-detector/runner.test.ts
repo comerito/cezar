@@ -31,6 +31,7 @@ function makeIssueData(number: number, overrides: Record<string, unknown> = {}) 
     body,
     state: 'open' as const,
     labels: [],
+    assignees: [],
     author: 'user1',
     createdAt: '2024-01-01T00:00:00Z',
     updatedAt: '2024-06-01T00:00:00Z',
@@ -196,6 +197,30 @@ describe('ClaimDetectorRunner', () => {
 
     expect(results.isEmpty).toBe(true);
     expect(store.getIssue(1)!.analysis.claimDetectedBy).toBeNull();
+  });
+
+  it('skips issues where claimant is already assigned', async () => {
+    // Create store manually so issue 1 has assignees from the start
+    const store = await IssueStore.init(tmpDir, { owner: 'test', repo: 'repo' });
+    store.upsertIssue(makeIssueData(1, { assignees: ['gsobczyk'] }));
+    store.upsertIssue(makeIssueData(2));
+    await store.save();
+
+    const mockGitHub = createMockGitHub({
+      1: [{ author: 'gsobczyk', body: "I'll take it", createdAt: '2024-06-01T10:00:00Z' }],
+      2: [{ author: 'dev42', body: "I'll work on this", createdAt: '2024-06-01T10:00:00Z' }],
+    });
+
+    const runner = new ClaimDetectorRunner(store, makeConfig(), mockGitHub);
+    const results = await runner.detect();
+
+    // Issue 1 should NOT appear in results (already assigned)
+    expect(results.items).toHaveLength(1);
+    expect(results.items[0].number).toBe(2);
+
+    // But issue 1 should still be marked as analyzed
+    expect(store.getIssue(1)!.analysis.claimDetectedBy).toBe('gsobczyk');
+    expect(store.getIssue(1)!.analysis.claimDetectedAt).toBeTruthy();
   });
 
   it('multiple claims: latest wins', async () => {
