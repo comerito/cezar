@@ -3,6 +3,11 @@ import type { Config } from '../../models/config.model.js';
 import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { buildMilestonePlanPrompt, MilestonePlanResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
+
+export interface MilestonePlanOptions {
+  excludeIssues?: Set<number>;
+}
 
 export interface MilestoneSuggestion {
   name: string;
@@ -69,8 +74,11 @@ export class MilestonePlanRunner {
     this.llmService = llmService;
   }
 
-  async plan(): Promise<MilestonePlanResults> {
-    const openIssues = this.store.getIssues({ state: 'open', hasDigest: true });
+  async plan(options: MilestonePlanOptions = {}): Promise<MilestonePlanResults> {
+    const openIssues = applyPipelineExclusions(
+      this.store.getIssues({ state: 'open', hasDigest: true }),
+      options,
+    );
 
     if (openIssues.length < 3) {
       return MilestonePlanResults.empty('Need at least 3 open issues for meaningful grouping.');

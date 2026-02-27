@@ -5,11 +5,13 @@ import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { chunkArray } from '../../utils/chunker.js';
 import { buildRecurringQuestionPrompt, RecurringQuestionResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface RecurringQuestionOptions {
   state?: 'open' | 'closed' | 'all';
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export interface RecurringQuestionItem {
@@ -79,9 +81,10 @@ export class RecurringQuestionRunner {
       i.commentsFetchedAt !== null &&
       i.commentsFetchedAt > i.analysis.recurringAnalyzedAt,
     );
-    const candidates = options.recheck
-      ? allQuestions
-      : [...unanalyzed, ...commentUpdated];
+    const candidates = applyPipelineExclusions(
+      options.recheck ? allQuestions : [...unanalyzed, ...commentUpdated],
+      options,
+    );
 
     if (candidates.length === 0) {
       return RecurringQuestionResults.empty('All questions already checked. Use --recheck to re-run.');

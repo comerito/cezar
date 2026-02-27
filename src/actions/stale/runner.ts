@@ -4,11 +4,13 @@ import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { chunkArray } from '../../utils/chunker.js';
 import { buildStaleAnalysisPrompt, StaleAnalysisResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface StaleOptions {
   daysThreshold?: number;
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export interface StaleIssueResult {
@@ -111,9 +113,10 @@ export class StaleRunner {
       i.commentsFetchedAt !== null &&
       i.commentsFetchedAt > i.analysis.staleAnalyzedAt,
     );
-    const candidates = options.recheck
-      ? staleIssues
-      : [...unanalyzed, ...commentUpdated];
+    const candidates = applyPipelineExclusions(
+      options.recheck ? staleIssues : [...unanalyzed, ...commentUpdated],
+      options,
+    );
 
     if (candidates.length === 0) {
       return StaleResults.empty('All stale issues already analyzed. Use --recheck to re-run.');

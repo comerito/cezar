@@ -4,11 +4,13 @@ import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { chunkArray } from '../../utils/chunker.js';
 import { buildSecurityPrompt, SecurityResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface SecurityOptions {
   state?: 'open' | 'closed' | 'all';
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export interface SecurityFinding {
@@ -80,9 +82,10 @@ export class SecurityRunner {
       i.commentsFetchedAt !== null &&
       i.commentsFetchedAt > i.analysis.securityAnalyzedAt,
     );
-    const candidates = options.recheck
-      ? allIssues
-      : [...unanalyzed, ...commentUpdated];
+    const candidates = applyPipelineExclusions(
+      options.recheck ? allIssues : [...unanalyzed, ...commentUpdated],
+      options,
+    );
 
     if (candidates.length === 0) {
       return SecurityResults.empty('All issues already scanned. Use --recheck to re-run.');

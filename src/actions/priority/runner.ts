@@ -3,6 +3,7 @@ import type { Config } from '../../models/config.model.js';
 import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { chunkArray } from '../../utils/chunker.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 import { buildPriorityPrompt, PriorityResponseSchema } from './prompt.js';
 
 const PRIORITY_ORDER = ['critical', 'high', 'medium', 'low'] as const;
@@ -11,6 +12,7 @@ export interface PriorityOptions {
   state?: 'open' | 'closed' | 'all';
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export interface PrioritizedIssue {
@@ -78,9 +80,10 @@ export class PriorityRunner {
       i.commentsFetchedAt !== null &&
       i.commentsFetchedAt > i.analysis.priorityAnalyzedAt,
     );
-    const candidates = options.recheck
-      ? allIssues
-      : [...unanalyzed, ...commentUpdated];
+    const candidates = applyPipelineExclusions(
+      options.recheck ? allIssues : [...unanalyzed, ...commentUpdated],
+      options,
+    );
 
     if (candidates.length === 0) {
       return PriorityResults.empty('All issues already scored. Use --recheck to re-run.');

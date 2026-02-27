@@ -9,6 +9,7 @@ import { runCommand } from './commands/run.js';
 import { launchHub } from './ui/hub.js';
 import { IssueStore } from './store/store.js';
 import { VERSION } from './utils/version.js';
+import { runPipeline } from './pipeline/index.js';
 
 // Register all actions (side-effect imports)
 import './actions/duplicates/index.js';
@@ -78,6 +79,25 @@ program.command('run <action>')
   .action(async (actionId, opts) => {
     const config = await loadConfig();
     await runCommand(actionId, opts, config);
+  });
+
+program.command('pipeline')
+  .description('Run full pipeline: close-detection first, then enrichment with exclusions')
+  .option('--recheck', 'Re-analyze already-analyzed issues')
+  .option('--dry-run', 'Show what would happen without writing')
+  .option('--no-interactive', 'Force non-interactive mode')
+  .action(async (opts) => {
+    const config = await loadConfig();
+    const store = await IssueStore.loadOrNull(config.store.path);
+    if (!store) {
+      console.error(chalk.red("Store not found. Run 'cezar init' first."));
+      process.exit(1);
+    }
+    await runPipeline(store, config, {
+      recheck: opts.recheck ?? false,
+      dryRun: opts.dryRun ?? false,
+      interactive: opts.interactive !== false && process.stdout.isTTY === true,
+    });
   });
 
 // No subcommand → launch interactive hub

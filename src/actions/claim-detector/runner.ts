@@ -2,10 +2,12 @@ import ora from 'ora';
 import type { Config } from '../../models/config.model.js';
 import { IssueStore } from '../../store/store.js';
 import { detectClaim, type ClaimMatch } from './patterns.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface ClaimDetectorOptions {
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export interface ClaimIssueResult {
@@ -81,9 +83,10 @@ export class ClaimDetectorRunner {
       i.commentsFetchedAt !== null &&
       i.commentsFetchedAt > i.analysis.claimDetectedAt,
     );
-    const candidates = options.recheck
-      ? openIssues
-      : [...unanalyzed, ...commentUpdated];
+    const candidates = applyPipelineExclusions(
+      options.recheck ? openIssues : [...unanalyzed, ...commentUpdated],
+      options,
+    );
 
     if (candidates.length === 0) {
       return ClaimDetectorResults.empty('All open issues already checked. Use --recheck to re-run.');

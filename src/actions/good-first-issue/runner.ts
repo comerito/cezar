@@ -4,11 +4,13 @@ import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { chunkArray } from '../../utils/chunker.js';
 import { buildGoodFirstIssuePrompt, GoodFirstIssueResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface GoodFirstIssueOptions {
   state?: 'open' | 'closed' | 'all';
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export interface GoodFirstIssueSuggestion {
@@ -71,9 +73,12 @@ export class GoodFirstIssueRunner {
     const allIssues = this.store.getIssues({ state, hasDigest: true })
       .filter(i => !i.labels.includes('good first issue'));
 
-    const candidates = options.recheck
-      ? allIssues
-      : allIssues.filter(i => i.analysis.goodFirstIssueAnalyzedAt === null);
+    const candidates = applyPipelineExclusions(
+      options.recheck
+        ? allIssues
+        : allIssues.filter(i => i.analysis.goodFirstIssueAnalyzedAt === null),
+      options,
+    );
 
     if (candidates.length === 0) {
       return GoodFirstIssueResults.empty('All issues already analyzed. Use --recheck to re-run.');

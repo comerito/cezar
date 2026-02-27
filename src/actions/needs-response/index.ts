@@ -40,6 +40,7 @@ actionRegistry.register({
     const runnerOpts: NeedsResponseOptions = {
       recheck: options.recheck as boolean ?? false,
       dryRun: options.dryRun as boolean ?? false,
+      excludeIssues: options.excludeIssues as Set<number> | undefined,
     };
 
     const runner = new NeedsResponseRunner(store, config);

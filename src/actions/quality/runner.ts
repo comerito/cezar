@@ -4,10 +4,12 @@ import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { chunkArray } from '../../utils/chunker.js';
 import { buildQualityCheckPrompt, QualityCheckResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface QualityOptions {
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export type QualityFlag = 'spam' | 'vague' | 'test' | 'wrong-language';
@@ -91,9 +93,12 @@ export class QualityRunner {
   async check(options: QualityOptions = {}): Promise<QualityResults> {
     const openIssues = this.store.getIssues({ state: 'open' });
 
-    const candidates = options.recheck
-      ? openIssues
-      : openIssues.filter(i => i.analysis.qualityAnalyzedAt === null);
+    const candidates = applyPipelineExclusions(
+      options.recheck
+        ? openIssues
+        : openIssues.filter(i => i.analysis.qualityAnalyzedAt === null),
+      options,
+    );
 
     if (candidates.length === 0) {
       return QualityResults.empty('All open issues already checked. Use --recheck to re-run.');

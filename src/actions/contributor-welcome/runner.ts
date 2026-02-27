@@ -4,10 +4,12 @@ import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { chunkArray } from '../../utils/chunker.js';
 import { buildWelcomePrompt, WelcomeResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface WelcomeOptions {
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export interface WelcomeCandidate {
@@ -94,9 +96,12 @@ export class ContributorWelcomeRunner {
     }
 
     // Filter to unwelcomed unless recheck
-    const candidates = options.recheck
-      ? firstTimeIssues
-      : firstTimeIssues.filter(i => i.analysis.welcomeCommentPostedAt === null);
+    const candidates = applyPipelineExclusions(
+      options.recheck
+        ? firstTimeIssues
+        : firstTimeIssues.filter(i => i.analysis.welcomeCommentPostedAt === null),
+      options,
+    );
 
     if (candidates.length === 0) {
       return WelcomeResults.empty('All first-time contributors already welcomed. Use --recheck to re-run.');

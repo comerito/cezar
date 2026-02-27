@@ -8,6 +8,7 @@ import type { ActionDefinition, ActionGroup } from '../actions/action.interface.
 import { IssueStore } from '../store/store.js';
 import type { Config } from '../models/config.model.js';
 import { syncCommand } from '../commands/sync.js';
+import { runPipeline } from '../pipeline/index.js';
 
 export async function launchHub(store: IssueStore | null, config: Config): Promise<void> {
   // First launch — run setup wizard if no store exists
@@ -37,6 +38,17 @@ export async function launchHub(store: IssueStore | null, config: Config): Promi
     });
 
     if (selected === 'exit') return;
+
+    if (selected === 'pipeline') {
+      if (!store) {
+        console.error(chalk.red("Store not found. Run 'cezar init' first."));
+        continue;
+      }
+      await runPipeline(store, config);
+      // Reload store after pipeline to pick up new data
+      store = await IssueStore.loadOrNull(config.store.path);
+      continue;
+    }
 
     if (selected === 'sync') {
       await syncCommand({}, config);
@@ -121,6 +133,7 @@ function buildChoices(store: IssueStore | null): Array<SelectChoice | Separator>
   return [
     ...actionChoices,
     new Separator(),
+    { name: '🚀  Run Full Pipeline', value: 'pipeline' },
     { name: '🔄  Sync with GitHub', value: 'sync' },
     new Separator(),
     { name: '✕   Exit', value: 'exit' },

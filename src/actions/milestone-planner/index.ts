@@ -20,12 +20,14 @@ actionRegistry.register({
     return true;
   },
 
-  async run({ store, config, interactive }) {
+  async run({ store, config, interactive, options }) {
     if (interactive) {
       await new MilestonePlanInteractiveUI(store, config).present();
     } else {
       const runner = new MilestonePlanRunner(store, config);
-      const results = await runner.plan();
+      const results = await runner.plan({
+        excludeIssues: options.excludeIssues as Set<number> | undefined,
+      });
       results.print();
     }
   },

@@ -5,11 +5,13 @@ import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { chunkArray } from '../../utils/chunker.js';
 import { buildMissingInfoPrompt, MissingInfoResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface MissingInfoOptions {
   state?: 'open' | 'closed' | 'all';
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export interface MissingInfoItem {
@@ -75,9 +77,10 @@ export class MissingInfoRunner {
       i.commentsFetchedAt !== null &&
       i.commentsFetchedAt > i.analysis.missingInfoAnalyzedAt,
     );
-    const candidates = options.recheck
-      ? allBugs
-      : [...unanalyzed, ...commentUpdated];
+    const candidates = applyPipelineExclusions(
+      options.recheck ? allBugs : [...unanalyzed, ...commentUpdated],
+      options,
+    );
 
     if (candidates.length === 0) {
       return MissingInfoResults.empty('All bug reports already checked. Use --recheck to re-run.');

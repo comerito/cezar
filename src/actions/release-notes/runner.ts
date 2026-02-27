@@ -4,12 +4,14 @@ import type { StoredIssue } from '../../store/store.model.js';
 import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { buildReleaseNotesPrompt, ReleaseNotesResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface ReleaseNotesOptions {
   since?: string;
   until?: string;
   issues?: number[];
   versionTag?: string;
+  excludeIssues?: Set<number>;
 }
 
 export class ReleaseNotesResult {
@@ -48,7 +50,7 @@ export class ReleaseNotesRunner {
   }
 
   async generate(options: ReleaseNotesOptions = {}): Promise<ReleaseNotesResult> {
-    const selectedIssues = this.selectIssues(options);
+    const selectedIssues = applyPipelineExclusions(this.selectIssues(options), options);
 
     if (selectedIssues.length === 0) {
       return ReleaseNotesResult.empty('No closed issues found for the given criteria.');

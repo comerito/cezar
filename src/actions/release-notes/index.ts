@@ -20,12 +20,14 @@ actionRegistry.register({
     return true;
   },
 
-  async run({ store, config, interactive }) {
+  async run({ store, config, interactive, options }) {
     if (interactive) {
       await new ReleaseNotesInteractiveUI(store, config).present();
     } else {
       const runner = new ReleaseNotesRunner(store, config);
-      const result = await runner.generate();
+      const result = await runner.generate({
+        excludeIssues: options.excludeIssues as Set<number> | undefined,
+      });
       result.print();
     }
   },

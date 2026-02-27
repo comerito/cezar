@@ -6,11 +6,13 @@ import { LLMService } from '../../services/llm.service.js';
 import { GitHubService } from '../../services/github.service.js';
 import { chunkArray } from '../../utils/chunker.js';
 import { buildLabelPrompt, LabelResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface LabelOptions {
   state?: 'open' | 'closed' | 'all';
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export interface LabelSuggestion {
@@ -75,9 +77,12 @@ export class AutoLabelRunner {
     const state = (options.state ?? 'open') as 'open' | 'closed' | 'all';
     const allIssues = this.store.getIssues({ state, hasDigest: true });
 
-    const candidates = options.recheck
-      ? allIssues
-      : allIssues.filter(i => i.analysis.labelsAnalyzedAt === null);
+    const candidates = applyPipelineExclusions(
+      options.recheck
+        ? allIssues
+        : allIssues.filter(i => i.analysis.labelsAnalyzedAt === null),
+      options,
+    );
 
     if (candidates.length === 0) {
       return LabelResults.empty('All issues already analyzed. Use --recheck to re-run.');

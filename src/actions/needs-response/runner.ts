@@ -4,10 +4,12 @@ import { IssueStore } from '../../store/store.js';
 import { LLMService } from '../../services/llm.service.js';
 import { chunkArray } from '../../utils/chunker.js';
 import { buildNeedsResponsePrompt, NeedsResponseResponseSchema } from './prompt.js';
+import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
 
 export interface NeedsResponseOptions {
   recheck?: boolean;
   dryRun?: boolean;
+  excludeIssues?: Set<number>;
 }
 
 export interface NeedsResponseItem {
@@ -86,9 +88,10 @@ export class NeedsResponseRunner {
       i.commentsFetchedAt !== null &&
       i.commentsFetchedAt > i.analysis.needsResponseAnalyzedAt,
     );
-    const candidates = options.recheck
-      ? openIssues
-      : [...unanalyzed, ...commentUpdated];
+    const candidates = applyPipelineExclusions(
+      options.recheck ? openIssues : [...unanalyzed, ...commentUpdated],
+      options,
+    );
 
     if (candidates.length === 0) {
       return NeedsResponseResults.empty('All open issues already checked. Use --recheck to re-run.');
