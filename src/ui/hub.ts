@@ -1,4 +1,4 @@
-import { select, Separator } from '@inquirer/prompts';
+import { select, confirm, Separator } from '@inquirer/prompts';
 import chalk from 'chalk';
 import { clearScreen, renderLogo } from './logo.js';
 import { renderStatusBox } from './status.js';
@@ -49,7 +49,20 @@ export async function launchHub(store: IssueStore | null, config: Config): Promi
     const action = actionRegistry.get(selected);
     if (!action) continue;
 
-    await action.run({ store, config, interactive: true, options: {} });
+    // If action has no new work, offer to re-evaluate from scratch
+    const badge = action.getBadge(store);
+    const hasWork = /\d/.test(badge);
+
+    if (!hasWork) {
+      const rerun = await confirm({
+        message: `${action.label} is up to date. Re-evaluate all issues from scratch?`,
+        default: false,
+      });
+      if (!rerun) continue;
+      await action.run({ store, config, interactive: true, options: { recheck: true } });
+    } else {
+      await action.run({ store, config, interactive: true, options: {} });
+    }
   }
 }
 
