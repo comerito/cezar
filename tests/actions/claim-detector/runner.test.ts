@@ -259,8 +259,11 @@ describe('ClaimDetectorRunner', () => {
     const results1 = await runner1.detect();
     expect(results1.isEmpty).toBe(true);
 
-    // Simulate new comments fetched after analysis
-    store.setComments(1, [{ author: 'dev', body: "I'll take it", createdAt: '2024-07-01T10:00:00Z' }]);
+    // Simulate new comments fetched after analysis (ensure timestamp is strictly later)
+    const futureTs = new Date(Date.now() + 5000).toISOString();
+    const issue1 = store.getIssue(1)!;
+    issue1.comments = [{ author: 'dev', body: "I'll take it", createdAt: '2024-07-01T10:00:00Z' }];
+    issue1.commentsFetchedAt = futureTs;
     await store.save();
 
     // Second run — should pick up issue 1 as comment-updated

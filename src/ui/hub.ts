@@ -18,6 +18,11 @@ export async function launchHub(store: IssueStore | null, config: Config): Promi
     if (!store) return; // wizard failed or user cancelled
   }
 
+  // Populate config from store metadata (owner/repo may not be in config file)
+  const meta = store.getMeta();
+  if (!config.github.owner) config.github.owner = meta.owner;
+  if (!config.github.repo) config.github.repo = meta.repo;
+
   while (true) {
     clearScreen();
     renderLogo();
