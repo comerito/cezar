@@ -63,6 +63,11 @@ export const IssueAnalysisSchema = z.object({
   claimComment: z.string().nullable().default(null),
   claimDetectedAt: z.string().nullable().default(null),
 
+  // Needs response action
+  needsResponseStatus: z.enum(['needs-response', 'responded', 'new-issue']).nullable().default(null),
+  needsResponseReason: z.string().nullable().default(null),
+  needsResponseAnalyzedAt: z.string().nullable().default(null),
+
   // Done detector action
   doneDetected: z.boolean().nullable().default(null),
   doneConfidence: z.number().min(0).max(1).nullable().default(null),
@@ -123,6 +128,8 @@ export const StoreMetaSchema = z.object({
   lastSyncedAt: z.string().nullable().default(null),
   totalFetched: z.number().default(0),
   version: z.literal(1).default(1),
+  orgMembers: z.array(z.string()).default([]),
+  orgMembersFetchedAt: z.string().nullable().default(null),
 });
 
 export type StoreMeta = z.infer<typeof StoreMetaSchema>;

@@ -16,7 +16,7 @@ function makeConfig(): Config {
       digestBatchSize: 20, duplicateBatchSize: 30, minDuplicateConfidence: 0.80, includeClosed: false,
       labelBatchSize: 20, missingInfoBatchSize: 15, recurringBatchSize: 15,
       priorityBatchSize: 20, securityBatchSize: 20, staleDaysThreshold: 90, staleCloseDays: 14,
-      doneDetectorBatchSize: 10,
+      doneDetectorBatchSize: 10, needsResponseBatchSize: 15,
     },
   };
 }

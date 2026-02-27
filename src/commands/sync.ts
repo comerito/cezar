@@ -114,6 +114,24 @@ export async function syncCommand(opts: SyncOptions, config: Config): Promise<vo
     }
   }
 
+  // Refresh org members if stale (>24h)
+  const orgMembersFetchedAt = meta.orgMembersFetchedAt;
+  const orgStaleMs = 24 * 60 * 60 * 1000;
+  if (!orgMembersFetchedAt || (Date.now() - new Date(orgMembersFetchedAt).getTime()) > orgStaleMs) {
+    const orgSpinner = ora('Refreshing org members...').start();
+    try {
+      const orgMembers = await github.fetchOrgMembers(meta.owner);
+      store.updateMeta({
+        orgMembers,
+        orgMembersFetchedAt: new Date().toISOString(),
+      });
+      await store.save();
+      orgSpinner.succeed(`Found ${orgMembers.length} org member(s)`);
+    } catch {
+      orgSpinner.warn('Could not refresh org members');
+    }
+  }
+
   // Summary
   const unanalyzed = store.getIssues({ state: 'open', hasDigest: true })
     .filter(i => i.analysis.duplicatesAnalyzedAt === null).length;

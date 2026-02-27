@@ -25,6 +25,7 @@ import './actions/contributor-welcome/index.js';
 import './actions/quality/index.js';
 import './actions/done-detector/index.js';
 import './actions/claim-detector/index.js';
+import './actions/needs-response/index.js';
 
 const program = new Command()
   .name('cezar')

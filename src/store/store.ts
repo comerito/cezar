@@ -26,6 +26,8 @@ export class IssueStore {
         lastSyncedAt: null,
         totalFetched: 0,
         version: 1,
+        orgMembers: [],
+        orgMembersFetchedAt: null,
       },
       issues: [],
     };

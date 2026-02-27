@@ -31,6 +31,7 @@ export const ConfigSchema = z.object({
     staleDaysThreshold: z.number().default(90),
     staleCloseDays: z.number().default(14),
     doneDetectorBatchSize: z.number().default(10),
+    needsResponseBatchSize: z.number().default(15),
   }).default({}),
 });
 

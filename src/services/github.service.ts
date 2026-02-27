@@ -176,6 +176,41 @@ export class GitHubService {
     }
   }
 
+  async fetchOrgMembers(org: string): Promise<string[]> {
+    const members = new Set<string>();
+
+    // Try org members endpoint first (requires org:read scope)
+    try {
+      const orgMembers = await this.octokit.paginate(this.octokit.rest.orgs.listMembers, {
+        org,
+        per_page: 100,
+      });
+      for (const m of orgMembers) {
+        if (m.login) members.add(m.login);
+      }
+      if (members.size > 0) return [...members];
+    } catch {
+      // Token may not have org scope — fall through to collaborators
+    }
+
+    // Fallback: repo collaborators (works with most repo-level tokens)
+    try {
+      const collaborators = await this.octokit.paginate(this.octokit.rest.repos.listCollaborators, {
+        owner: this.owner,
+        repo: this.repo,
+        per_page: 100,
+      });
+      for (const c of collaborators) {
+        if (c.login) members.add(c.login);
+      }
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+
+    return [...members];
+  }
+
   async fetchRepoLabels(): Promise<string[]> {
     try {
       const labels = await this.octokit.paginate(this.octokit.rest.issues.listLabelsForRepo, {

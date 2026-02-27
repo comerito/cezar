@@ -122,6 +122,20 @@ export async function initCommand(opts: InitOptions, config: Config): Promise<vo
     }
   }
 
+  // Fetch org members
+  const orgSpinner = ora('Fetching org members...').start();
+  try {
+    const orgMembers = await github.fetchOrgMembers(owner);
+    store.updateMeta({
+      orgMembers,
+      orgMembersFetchedAt: new Date().toISOString(),
+    });
+    await store.save();
+    orgSpinner.succeed(`Found ${orgMembers.length} org member(s)`);
+  } catch {
+    orgSpinner.warn('Could not fetch org members (needs-response action will be unavailable)');
+  }
+
   console.log(chalk.green(`\nStore initialized at ${config.store.path}/store.json`));
   console.log(chalk.dim("Next: run 'cezar' to open the action menu"));
 }
