@@ -35,8 +35,12 @@ export function renderDuplicateGroup(group: DuplicateGroup, index: number, total
   lines.push('');
   lines.push(chalk.bold(`${header} ${'─'.repeat(Math.max(0, 50 - header.length))}`));
   lines.push('');
-  lines.push(`  ${chalk.green('ORIGINAL')}   #${group.original.number}  ${group.original.title}`);
-  lines.push(`  ${chalk.yellow('DUPLICATE')}  #${group.duplicate.number}  ${group.duplicate.title}`);
+  const origState = group.original.state === 'open' ? chalk.green('open') : chalk.gray('closed');
+  const dupState = group.duplicate.state === 'open' ? chalk.green('open') : chalk.gray('closed');
+  lines.push(`  ${chalk.green('ORIGINAL')}   #${group.original.number} [${origState}]  ${group.original.title}`);
+  lines.push(`               ${chalk.dim(group.original.htmlUrl)}`);
+  lines.push(`  ${chalk.yellow('DUPLICATE')}  #${group.duplicate.number} [${dupState}]  ${group.duplicate.title}`);
+  lines.push(`               ${chalk.dim(group.duplicate.htmlUrl)}`);
   lines.push('');
   lines.push(`  Confidence: ${Math.round(group.confidence * 100)}%`);
   lines.push(`  Reason: ${group.reason}`);
