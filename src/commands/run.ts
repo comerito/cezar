@@ -10,6 +10,7 @@ interface RunOptions {
   dryRun?: boolean;
   format?: string;
   interactive?: boolean;
+  description?: string;
 }
 
 export async function runCommand(actionId: string, opts: RunOptions, config: Config): Promise<void> {
@@ -44,6 +45,7 @@ export async function runCommand(actionId: string, opts: RunOptions, config: Con
       apply: opts.apply ?? false,
       dryRun: opts.dryRun ?? false,
       format: opts.format ?? 'table',
+      description: opts.description,
     },
   });
 }

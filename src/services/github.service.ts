@@ -225,6 +225,25 @@ export class GitHubService {
     }
   }
 
+  async createIssue(title: string, body: string, labels?: string[]): Promise<{ number: number; htmlUrl: string }> {
+    try {
+      const response = await this.octokit.rest.issues.create({
+        owner: this.owner,
+        repo: this.repo,
+        title,
+        body,
+        labels: labels ?? [],
+      });
+      return {
+        number: response.data.number,
+        htmlUrl: response.data.html_url,
+      };
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
   async addAssignees(issueNumber: number, assignees: string[]): Promise<void> {
     try {
       await this.octokit.rest.issues.addAssignees({

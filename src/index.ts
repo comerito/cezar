@@ -27,6 +27,7 @@ import './actions/quality/index.js';
 import './actions/done-detector/index.js';
 import './actions/claim-detector/index.js';
 import './actions/needs-response/index.js';
+import './actions/issue-check/index.js';
 
 const program = new Command()
   .name('cezar')
@@ -76,6 +77,7 @@ program.command('run <action>')
   .option('--dry-run', 'Show what would happen without writing')
   .option('--format <format>', 'table|json|markdown', 'table')
   .option('--no-interactive', 'Force non-interactive mode')
+  .option('--description <text>', 'Issue description (for issue-check action)')
   .action(async (actionId, opts) => {
     const config = await loadConfig();
     await runCommand(actionId, opts, config);
