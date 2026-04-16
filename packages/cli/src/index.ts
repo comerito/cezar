@@ -2,7 +2,8 @@
 import 'dotenv/config';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { loadConfig, IssueStore, runPipeline } from '@cezar/core';
+import { loadConfig, IssueStore } from '@cezar/core';
+import { runPipeline } from './pipeline.js';
 import { initCommand } from './commands/init.js';
 import { syncCommand } from './commands/sync.js';
 import { statusCommand } from './commands/status.js';

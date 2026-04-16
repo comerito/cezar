@@ -36,25 +36,6 @@ export class CategorizeResults {
   get isEmpty(): boolean {
     return this.suggestions.length === 0;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No categorization suggestions found.');
-      return;
-    }
-
-    for (const s of this.suggestions) {
-      console.log(`  #${s.number}: ${s.category}`);
-      console.log(`    ${s.reason}`);
-      console.log('');
-    }
-    console.log(`Categorized ${this.suggestions.length} issue(s).`);
-  }
 }
 
 export class CategorizeRunner {

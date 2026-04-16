@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { ClaimDetectorRunner, type ClaimDetectorOptions } from '@cezar/core';
 import { ClaimDetectorInteractiveUI } from './interactive.js';
+import { formatClaimDetectorResults } from '../../formatters/claim-detector.js';
 
 actionRegistry.register({
   id: 'claim-detector',
@@ -34,7 +35,7 @@ actionRegistry.register({
     if (interactive) {
       await new ClaimDetectorInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatClaimDetectorResults(results);
     }
   },
 });

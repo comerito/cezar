@@ -37,34 +37,6 @@ export class NeedsResponseResults {
   get needsResponse(): NeedsResponseItem[] {
     return this.items.filter(i => i.status === 'needs-response' || i.status === 'new-issue');
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No issues needing response found.');
-      return;
-    }
-
-    const awaiting = this.needsResponse;
-    const responded = this.items.filter(i => i.status === 'responded');
-
-    console.log(`\nNeeds response: ${awaiting.length} issue(s) awaiting maintainer response`);
-    if (responded.length > 0) {
-      console.log(`Already responded: ${responded.length} issue(s)`);
-    }
-    console.log('');
-
-    for (const item of awaiting) {
-      const tag = item.status === 'new-issue' ? '[NEW]' : '[AWAITING]';
-      console.log(`  ${tag} #${item.number}: ${item.title}`);
-      console.log(`    ${item.reason}`);
-      console.log('');
-    }
-  }
 }
 
 export class NeedsResponseRunner {

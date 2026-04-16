@@ -2,6 +2,7 @@ import { input } from '@inquirer/prompts';
 import { actionRegistry } from '@cezar/core';
 import { IssueCheckRunner, type IssueCheckOptions } from '@cezar/core';
 import { IssueCheckInteractiveUI } from './interactive.js';
+import { formatIssueCheckResults } from '../../formatters/issue-check.js';
 
 actionRegistry.register({
   id: 'issue-check',
@@ -47,7 +48,7 @@ actionRegistry.register({
     if (interactive) {
       await new IssueCheckInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatIssueCheckResults(results);
     }
   },
 });

@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { BugDetectorRunner, type BugDetectorOptions } from '@cezar/core';
 import { BugDetectorInteractiveUI } from './interactive.js';
+import { formatBugDetectorResults } from '../../formatters/bug-detector.js';
 
 actionRegistry.register({
   id: 'bug-detector',
@@ -38,7 +39,7 @@ actionRegistry.register({
     if (interactive) {
       await new BugDetectorInteractiveUI(results).present();
     } else {
-      results.print();
+      formatBugDetectorResults(results);
     }
   },
 });

@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { QualityRunner, type QualityOptions } from '@cezar/core';
 import { QualityInteractiveUI } from './interactive.js';
+import { formatQualityResults } from '../../formatters/quality.js';
 
 actionRegistry.register({
   id: 'quality',
@@ -34,7 +35,7 @@ actionRegistry.register({
     if (interactive) {
       await new QualityInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatQualityResults(results);
     }
   },
 });

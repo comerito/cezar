@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { ReleaseNotesInteractiveUI } from './interactive.js';
 import { ReleaseNotesRunner } from '@cezar/core';
+import { formatReleaseNotesResult } from '../../formatters/release-notes.js';
 
 actionRegistry.register({
   id: 'release-notes',
@@ -28,7 +29,7 @@ actionRegistry.register({
       const result = await runner.generate({
         excludeIssues: options.excludeIssues as Set<number> | undefined,
       });
-      result.print();
+      formatReleaseNotesResult(result);
     }
   },
 });

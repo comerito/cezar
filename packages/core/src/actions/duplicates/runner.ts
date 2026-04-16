@@ -32,36 +32,6 @@ export class DuplicateResults {
   get isEmpty(): boolean {
     return this.groups.length === 0;
   }
-
-  print(format: string = 'table'): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No duplicates found.');
-      return;
-    }
-
-    if (format === 'json') {
-      console.log(JSON.stringify(this.groups.map(g => ({
-        duplicate: g.duplicate.number,
-        original: g.original.number,
-        confidence: g.confidence,
-        reason: g.reason,
-      })), null, 2));
-      return;
-    }
-
-    // Default: table format
-    for (const group of this.groups) {
-      console.log(`  #${group.duplicate.number} → duplicate of #${group.original.number} (${Math.round(group.confidence * 100)}%)`);
-      console.log(`    ${group.reason}`);
-      console.log('');
-    }
-    console.log(`Found ${this.groups.length} duplicate(s).`);
-  }
 }
 
 export class DuplicatesRunner {

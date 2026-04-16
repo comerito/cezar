@@ -8,7 +8,7 @@ import type { ActionDefinition, ActionGroup } from '@cezar/core';
 import { IssueStore } from '@cezar/core';
 import type { Config } from '@cezar/core';
 import { syncCommand } from '../commands/sync.js';
-import { runPipeline } from '@cezar/core';
+import { runPipeline } from '../pipeline.js';
 
 export async function launchHub(store: IssueStore | null, config: Config): Promise<void> {
   // First launch — run setup wizard if no store exists

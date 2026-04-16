@@ -51,31 +51,6 @@ export class QualityResults {
     }
     return counts;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No quality issues found — all issues look legitimate.');
-      return;
-    }
-
-    const counts = this.flagCounts;
-    console.log(`\nFlagged ${this.flagged.length} issue(s):`);
-    for (const [flag, count] of Object.entries(counts)) {
-      console.log(`  ${flag}: ${count}`);
-    }
-
-    console.log('');
-    for (const item of this.flagged) {
-      console.log(`  #${item.number} [${item.flag}] ${item.title}`);
-      console.log(`    ${item.reason}`);
-      console.log('');
-    }
-  }
 }
 
 export class QualityRunner {

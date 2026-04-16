@@ -37,25 +37,6 @@ export class PriorityResults {
   get isEmpty(): boolean {
     return this.items.length === 0;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No issues to prioritize.');
-      return;
-    }
-
-    for (const item of this.items) {
-      console.log(`  [${item.priority}] #${item.number}: ${item.reason}`);
-      console.log(`    Signals: ${item.signals.join(', ')}`);
-      console.log('');
-    }
-    console.log(`Prioritized ${this.items.length} issue(s).`);
-  }
 }
 
 export class PriorityRunner {

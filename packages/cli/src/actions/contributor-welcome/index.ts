@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { ContributorWelcomeRunner, findFirstTimeAuthors, type WelcomeOptions } from '@cezar/core';
 import { ContributorWelcomeInteractiveUI } from './interactive.js';
+import { formatContributorWelcomeResults } from '../../formatters/contributor-welcome.js';
 
 actionRegistry.register({
   id: 'contributor-welcome',
@@ -35,7 +36,7 @@ actionRegistry.register({
     if (interactive) {
       await new ContributorWelcomeInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatContributorWelcomeResults(results);
     }
   },
 });

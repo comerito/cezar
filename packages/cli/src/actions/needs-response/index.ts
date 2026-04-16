@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { NeedsResponseRunner, type NeedsResponseOptions } from '@cezar/core';
 import { NeedsResponseInteractiveUI } from './interactive.js';
+import { formatNeedsResponseResults } from '../../formatters/needs-response.js';
 
 actionRegistry.register({
   id: 'needs-response',
@@ -49,7 +50,7 @@ actionRegistry.register({
     if (interactive) {
       await new NeedsResponseInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatNeedsResponseResults(results);
     }
   },
 });

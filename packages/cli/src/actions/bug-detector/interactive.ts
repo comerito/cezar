@@ -1,6 +1,7 @@
 import { select } from '@inquirer/prompts';
 import chalk from 'chalk';
 import type { BugClassification, BugDetectorResults } from '@cezar/core';
+import { formatBugDetectorResults } from '../../formatters/bug-detector.js';
 
 type Decision = 'keep' | 'override' | 'skip' | 'stop';
 
@@ -23,7 +24,7 @@ export class BugDetectorInteractiveUI {
     console.log('');
     console.log(chalk.bold('Bug detection complete'));
     console.log('─'.repeat(55));
-    this.results.print();
+    formatBugDetectorResults(this.results);
     console.log('');
 
     const lowConfidence = this.results.classifications.filter(c => c.confidence < 0.7);

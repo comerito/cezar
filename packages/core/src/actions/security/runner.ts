@@ -36,25 +36,6 @@ export class SecurityResults {
   get isEmpty(): boolean {
     return this.findings.length === 0;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No security findings.');
-      return;
-    }
-
-    for (const f of this.findings) {
-      console.log(`  #${f.number} [${f.severity}] ${f.category} (${Math.round(f.confidence * 100)}%)`);
-      console.log(`    ${f.explanation}`);
-      console.log('');
-    }
-    console.log(`Found ${this.findings.length} potential security issue(s).`);
-  }
 }
 
 const SEVERITY_ORDER = ['critical', 'high', 'medium', 'low'] as const;

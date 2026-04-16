@@ -35,25 +35,6 @@ export class GoodFirstIssueResults {
   get isEmpty(): boolean {
     return this.suggestions.length === 0;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No good first issue candidates found.');
-      return;
-    }
-
-    for (const s of this.suggestions) {
-      console.log(`  #${s.number} [${s.estimatedComplexity}]: ${s.reason}`);
-      console.log(`    Hint: ${s.codeHint}`);
-      console.log('');
-    }
-    console.log(`Found ${this.suggestions.length} good first issue candidate(s).`);
-  }
 }
 
 export class GoodFirstIssueRunner {

@@ -36,27 +36,6 @@ export class ClaimDetectorResults {
   get claimed(): ClaimIssueResult[] {
     return this.items;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No claim comments detected.');
-      return;
-    }
-
-    console.log(`\nClaim detector: ${this.items.length} issue(s) with claims`);
-    console.log('');
-
-    for (const item of this.items) {
-      console.log(`  #${item.number}  ${item.title}`);
-      console.log(`    Claimant: @${item.claimant} — "${item.snippet}"`);
-      console.log('');
-    }
-  }
 }
 
 export class ClaimDetectorRunner {

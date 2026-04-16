@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { GoodFirstIssueRunner, type GoodFirstIssueOptions } from '@cezar/core';
 import { GoodFirstIssueInteractiveUI } from './interactive.js';
+import { formatGoodFirstIssueResults } from '../../formatters/good-first-issue.js';
 
 actionRegistry.register({
   id: 'good-first-issue',
@@ -35,7 +36,7 @@ actionRegistry.register({
     if (interactive) {
       await new GoodFirstIssueInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatGoodFirstIssueResults(results);
     }
   },
 });

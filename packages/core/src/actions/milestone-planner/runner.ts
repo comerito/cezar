@@ -31,35 +31,6 @@ export class MilestonePlanResults {
   get isEmpty(): boolean {
     return this.milestones.length === 0;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No milestone plan generated.');
-      return;
-    }
-
-    for (const [i, ms] of this.milestones.entries()) {
-      console.log(`\nMILESTONE ${i + 1}: ${ms.name}`);
-      console.log(`  Theme: ${ms.theme}`);
-      console.log(`  Effort: ${ms.effort}`);
-      for (const issue of ms.issues) {
-        const p = issue.priority ? `${issue.priority.padEnd(9)} ` : '';
-        console.log(`    #${issue.number} ${p}${issue.title}`);
-      }
-    }
-
-    if (this.unassigned.length > 0) {
-      console.log(`\nUNASSIGNED (${this.unassigned.length} issues)`);
-      for (const issue of this.unassigned) {
-        console.log(`    #${issue.number} ${issue.title}`);
-      }
-    }
-  }
 }
 
 export class MilestonePlanRunner {

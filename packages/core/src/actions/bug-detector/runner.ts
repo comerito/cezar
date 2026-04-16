@@ -39,30 +39,6 @@ export class BugDetectorResults {
   get bugs(): BugClassification[] {
     return this.classifications.filter(c => c.issueType === 'bug');
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-    if (this.isEmpty) {
-      console.log('No issues classified.');
-      return;
-    }
-
-    const byType = {
-      bug: this.classifications.filter(c => c.issueType === 'bug').length,
-      feature: this.classifications.filter(c => c.issueType === 'feature').length,
-      question: this.classifications.filter(c => c.issueType === 'question').length,
-      other: this.classifications.filter(c => c.issueType === 'other').length,
-    };
-
-    console.log(`Classified ${this.classifications.length} issue(s):`);
-    console.log(`  🐛 bug:      ${byType.bug}`);
-    console.log(`  ✨ feature:  ${byType.feature}`);
-    console.log(`  ❓ question: ${byType.question}`);
-    console.log(`  📦 other:    ${byType.other}`);
-  }
 }
 
 export class BugDetectorRunner {

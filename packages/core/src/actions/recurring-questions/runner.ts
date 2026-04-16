@@ -36,26 +36,6 @@ export class RecurringQuestionResults {
   get isEmpty(): boolean {
     return this.items.length === 0;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No recurring questions found.');
-      return;
-    }
-
-    for (const item of this.items) {
-      const refs = item.similarClosedIssues.map(i => `#${i.number}`).join(', ');
-      console.log(`  #${item.number}: similar to ${refs}`);
-      console.log(`    ${item.suggestedResponse.split('\n')[0]}`);
-      console.log('');
-    }
-    console.log(`Found ${this.items.length} recurring question(s).`);
-  }
 }
 
 export class RecurringQuestionRunner {

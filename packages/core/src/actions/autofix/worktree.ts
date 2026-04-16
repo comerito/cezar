@@ -103,6 +103,8 @@ export async function createWorktree(opts: {
   fetchRemote?: boolean;
   /** If true, delete any existing local branch so the new worktree starts fresh. Used on retry. */
   resetBranch?: boolean;
+  /** Optional warn callback for non-fatal conditions (e.g. fetch fallback). */
+  onWarn?: (message: string) => void;
 }): Promise<WorktreeHandle> {
   await assertIsGitRepo(opts.repoRoot);
   await assertNotCezarCheckout(opts.repoRoot);
@@ -124,7 +126,7 @@ export async function createWorktree(opts: {
     } catch (err) {
       // Fall back to local baseBranch if the fetch fails (offline, auth issue,
       // etc). The caller can disable this behavior via autofix.fetchBeforeAttempt=false.
-      console.warn(`[autofix] fetch ${opts.remote}/${opts.baseBranch} failed; falling back to local ${opts.baseBranch}: ${(err as Error).message}`);
+      opts.onWarn?.(`[autofix] fetch ${opts.remote}/${opts.baseBranch} failed; falling back to local ${opts.baseBranch}: ${(err as Error).message}`);
     }
   }
 

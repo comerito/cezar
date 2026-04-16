@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { AutoLabelRunner, type LabelOptions } from '@cezar/core';
 import { AutoLabelInteractiveUI } from './interactive.js';
+import { formatLabelResults } from '../../formatters/auto-label.js';
 
 actionRegistry.register({
   id: 'auto-label',
@@ -35,7 +36,7 @@ actionRegistry.register({
     if (interactive) {
       await new AutoLabelInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatLabelResults(results);
     }
   },
 });

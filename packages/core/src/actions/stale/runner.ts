@@ -46,33 +46,6 @@ export class StaleResults {
     }
     return counts;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No stale issues found.');
-      return;
-    }
-
-    const counts = this.actionCounts;
-    console.log(`\nStale issues: ${this.items.length}`);
-    for (const action of ACTION_ORDER) {
-      if (counts[action]) {
-        console.log(`  ${action}: ${counts[action]}`);
-      }
-    }
-
-    console.log('');
-    for (const item of this.items) {
-      console.log(`  #${item.number} [${item.action}] ${item.title} (${item.daysSinceUpdate}d inactive)`);
-      console.log(`    ${item.reason}`);
-      console.log('');
-    }
-  }
 }
 
 function daysSince(dateStr: string): number {

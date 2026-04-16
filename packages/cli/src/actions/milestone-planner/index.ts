@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { MilestonePlanRunner } from '@cezar/core';
 import { MilestonePlanInteractiveUI } from './interactive.js';
+import { formatMilestoneResults } from '../../formatters/milestone-planner.js';
 
 actionRegistry.register({
   id: 'milestone-planner',
@@ -28,7 +29,7 @@ actionRegistry.register({
       const results = await runner.plan({
         excludeIssues: options.excludeIssues as Set<number> | undefined,
       });
-      results.print();
+      formatMilestoneResults(results);
     }
   },
 });

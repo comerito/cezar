@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { SecurityRunner, type SecurityOptions } from '@cezar/core';
 import { SecurityInteractiveUI } from './interactive.js';
+import { formatSecurityResults } from '../../formatters/security.js';
 
 actionRegistry.register({
   id: 'security',
@@ -35,7 +36,7 @@ actionRegistry.register({
     if (interactive) {
       await new SecurityInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatSecurityResults(results);
     }
   },
 });

@@ -35,23 +35,6 @@ export class MissingInfoResults {
   get isEmpty(): boolean {
     return this.items.length === 0;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No issues with missing information found.');
-      return;
-    }
-
-    for (const item of this.items) {
-      console.log(`  #${item.number}: missing ${item.missingFields.join(', ')}`);
-    }
-    console.log(`\nFound ${this.items.length} issue(s) with missing information.`);
-  }
 }
 
 export class MissingInfoRunner {

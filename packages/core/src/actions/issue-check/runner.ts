@@ -30,25 +30,6 @@ export class IssueCheckResults {
   get isEmpty(): boolean {
     return this.matches.length === 0;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No matching issues found.');
-      return;
-    }
-
-    for (const match of this.matches) {
-      console.log(`  #${match.issue.number} (${Math.round(match.confidence * 100)}%) — ${match.issue.title}`);
-      console.log(`    ${match.reason}`);
-      console.log('');
-    }
-    console.log(`Found ${this.matches.length} potential match(es).`);
-  }
 }
 
 export class IssueCheckRunner {

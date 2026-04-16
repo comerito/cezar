@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { MissingInfoRunner, type MissingInfoOptions } from '@cezar/core';
 import { MissingInfoInteractiveUI } from './interactive.js';
+import { formatMissingInfoResults } from '../../formatters/missing-info.js';
 
 actionRegistry.register({
   id: 'missing-info',
@@ -47,7 +48,7 @@ actionRegistry.register({
     if (interactive) {
       await new MissingInfoInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatMissingInfoResults(results);
     }
   },
 });

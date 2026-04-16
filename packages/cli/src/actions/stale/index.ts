@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { StaleRunner, type StaleOptions } from '@cezar/core';
 import { StaleInteractiveUI } from './interactive.js';
+import { formatStaleResults } from '../../formatters/stale.js';
 
 actionRegistry.register({
   id: 'stale',
@@ -49,7 +50,7 @@ actionRegistry.register({
     if (interactive) {
       await new StaleInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatStaleResults(results);
     }
   },
 });

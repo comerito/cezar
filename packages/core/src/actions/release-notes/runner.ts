@@ -27,14 +27,6 @@ export class ReleaseNotesResult {
   get isEmpty(): boolean {
     return this.issueCount === 0;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-    console.log(this.markdown);
-  }
 }
 
 export class ReleaseNotesRunner {

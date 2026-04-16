@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { DoneDetectorRunner, type DoneDetectorOptions } from '@cezar/core';
 import { DoneDetectorInteractiveUI } from './interactive.js';
+import { formatDoneDetectorResults } from '../../formatters/done-detector.js';
 
 actionRegistry.register({
   id: 'done-detector',
@@ -33,7 +34,7 @@ actionRegistry.register({
     if (interactive) {
       await new DoneDetectorInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatDoneDetectorResults(results);
     }
   },
 });

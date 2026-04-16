@@ -1,5 +1,6 @@
 import type { IssueStore } from '../store/store.js';
 import type { Config } from '../config/config.model.js';
+import type { EventPort } from '../ports/event.port.js';
 import { actionRegistry } from '../actions/registry.js';
 import { getCloseFlaggedIssueNumbers } from './close-flag.js';
 
@@ -13,6 +14,7 @@ export interface PipelineOptions {
   autofix?: boolean;
   apply?: boolean;
   maxIssues?: number;
+  events?: EventPort;
 }
 
 export interface PipelineResult {
@@ -28,6 +30,7 @@ export async function runPipeline(
   config: Config,
   options: PipelineOptions = {},
 ): Promise<PipelineResult> {
+  const emit = (msg: string) => options.events?.lifecycle(msg);
   const allActions = actionRegistry.getAll();
 
   const phase1 = allActions.filter(a => CLOSE_DETECTION_ACTION_IDS.includes(a.id));
@@ -45,17 +48,16 @@ export async function runPipeline(
     errors: [],
   };
 
-  // --- Phase 1: Close-detection actions ---
-  console.log('\n── Phase 1: Close Detection ──\n');
+  emit('── Phase 1: Close Detection ──');
 
   for (const action of phase1) {
     const availability = action.isAvailable(store);
     if (availability !== true) {
-      console.log(`  Skipping ${action.label}: ${availability}`);
+      emit(`Skipping ${action.label}: ${availability}`);
       continue;
     }
 
-    console.log(`  Running ${action.icon}  ${action.label}...`);
+    emit(`Running ${action.icon}  ${action.label}...`);
     try {
       await action.run({
         store,
@@ -69,30 +71,28 @@ export async function runPipeline(
       result.phase1Actions.push(action.id);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      console.error(`  Error in ${action.id}: ${err.message}`);
+      emit(`Error in ${action.id}: ${err.message}`);
       result.errors.push({ actionId: action.id, error: err });
     }
   }
 
-  // --- Collect close-flagged issues ---
   const excludeIssues = getCloseFlaggedIssueNumbers(store);
   result.closeFlaggedCount = excludeIssues.size;
 
   if (excludeIssues.size > 0) {
-    console.log(`\n  ${excludeIssues.size} issue(s) flagged for closing — excluded from enrichment.\n`);
+    emit(`${excludeIssues.size} issue(s) flagged for closing — excluded from enrichment.`);
   }
 
-  // --- Phase 2: Enrichment actions ---
-  console.log('\n── Phase 2: Enrichment ──\n');
+  emit('── Phase 2: Enrichment ──');
 
   for (const action of phase2) {
     const availability = action.isAvailable(store);
     if (availability !== true) {
-      console.log(`  Skipping ${action.label}: ${availability}`);
+      emit(`Skipping ${action.label}: ${availability}`);
       continue;
     }
 
-    console.log(`  Running ${action.icon}  ${action.label}...`);
+    emit(`Running ${action.icon}  ${action.label}...`);
     try {
       await action.run({
         store,
@@ -107,23 +107,22 @@ export async function runPipeline(
       result.phase2Actions.push(action.id);
     } catch (error) {
       const err = error instanceof Error ? error : new Error(String(error));
-      console.error(`  Error in ${action.id}: ${err.message}`);
+      emit(`Error in ${action.id}: ${err.message}`);
       result.errors.push({ actionId: action.id, error: err });
     }
   }
 
-  // --- Phase 3: Act (opt-in) ---
   if (options.autofix && phase3.length > 0) {
-    console.log('\n── Phase 3: Act ──\n');
+    emit('── Phase 3: Act ──');
 
     for (const action of phase3) {
       const availability = action.isAvailable(store);
       if (availability !== true) {
-        console.log(`  Skipping ${action.label}: ${availability}`);
+        emit(`Skipping ${action.label}: ${availability}`);
         continue;
       }
 
-      console.log(`  Running ${action.icon}  ${action.label}...`);
+      emit(`Running ${action.icon}  ${action.label}...`);
       try {
         await action.run({
           store,
@@ -140,27 +139,11 @@ export async function runPipeline(
         result.phase3Actions.push(action.id);
       } catch (error) {
         const err = error instanceof Error ? error : new Error(String(error));
-        console.error(`  Error in ${action.id}: ${err.message}`);
+        emit(`Error in ${action.id}: ${err.message}`);
         result.errors.push({ actionId: action.id, error: err });
       }
     }
   }
-
-  // --- Summary ---
-  console.log('\n── Pipeline Summary ──\n');
-  console.log(`  Phase 1: ${result.phase1Actions.length} action(s) ran`);
-  console.log(`  Phase 2: ${result.phase2Actions.length} action(s) ran`);
-  if (options.autofix) {
-    console.log(`  Phase 3: ${result.phase3Actions.length} action(s) ran`);
-  }
-  console.log(`  Close-flagged: ${result.closeFlaggedCount} issue(s)`);
-  if (result.errors.length > 0) {
-    console.log(`  Errors: ${result.errors.length}`);
-    for (const { actionId, error } of result.errors) {
-      console.log(`    - ${actionId}: ${error.message}`);
-    }
-  }
-  console.log('');
 
   return result;
 }

@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { DuplicatesRunner, type DuplicateOptions } from '@cezar/core';
 import { DuplicatesInteractiveUI } from './interactive.js';
+import { formatDuplicateResults } from '../../formatters/duplicates.js';
 
 actionRegistry.register({
   id: 'duplicates',
@@ -45,7 +46,7 @@ actionRegistry.register({
     if (interactive) {
       await new DuplicatesInteractiveUI(results, config).present();
     } else {
-      results.print(runnerOpts.format);
+      formatDuplicateResults(results, runnerOpts.format);
     }
   },
 });

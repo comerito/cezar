@@ -37,26 +37,6 @@ export class LabelResults {
   get isEmpty(): boolean {
     return this.suggestions.length === 0;
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No label suggestions found.');
-      return;
-    }
-
-    for (const s of this.suggestions) {
-      const current = s.currentLabels.length > 0 ? s.currentLabels.join(', ') : '(none)';
-      console.log(`  #${s.number}: ${current} → +${s.suggestedLabels.join(', +')}`);
-      console.log(`    ${s.reason}`);
-      console.log('');
-    }
-    console.log(`Found ${this.suggestions.length} issue(s) needing labels.`);
-  }
 }
 
 export class AutoLabelRunner {

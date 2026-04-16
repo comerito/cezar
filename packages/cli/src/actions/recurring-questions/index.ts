@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { RecurringQuestionRunner, type RecurringQuestionOptions } from '@cezar/core';
 import { RecurringQuestionInteractiveUI } from './interactive.js';
+import { formatRecurringResults } from '../../formatters/recurring-questions.js';
 
 actionRegistry.register({
   id: 'recurring-questions',
@@ -38,7 +39,7 @@ actionRegistry.register({
     if (interactive) {
       await new RecurringQuestionInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatRecurringResults(results);
     }
   },
 });

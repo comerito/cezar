@@ -1,6 +1,7 @@
 import { actionRegistry } from '@cezar/core';
 import { CategorizeRunner, type CategorizeOptions } from '@cezar/core';
 import { CategorizeInteractiveUI } from './interactive.js';
+import { formatCategorizeResults } from '../../formatters/categorize.js';
 
 actionRegistry.register({
   id: 'categorize',
@@ -35,7 +36,7 @@ actionRegistry.register({
     if (interactive) {
       await new CategorizeInteractiveUI(results, config).present();
     } else {
-      results.print();
+      formatCategorizeResults(results);
     }
   },
 });

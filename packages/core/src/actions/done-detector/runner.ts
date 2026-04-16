@@ -39,33 +39,6 @@ export class DoneDetectorResults {
   get resolved(): DoneIssueResult[] {
     return this.items.filter(i => i.isDone);
   }
-
-  print(): void {
-    if (this.message) {
-      console.log(this.message);
-      return;
-    }
-
-    if (this.isEmpty) {
-      console.log('No issues with merged PR references found.');
-      return;
-    }
-
-    const done = this.resolved;
-    const notDone = this.items.filter(i => !i.isDone);
-
-    console.log(`\nDone detector: ${this.items.length} issue(s) checked`);
-    console.log(`  Likely resolved: ${done.length}`);
-    console.log(`  Not resolved:    ${notDone.length}`);
-    console.log('');
-
-    for (const item of done) {
-      const prs = item.mergedPRs.map(pr => `#${pr.prNumber}`).join(', ');
-      console.log(`  #${item.number} [${(item.confidence * 100).toFixed(0)}%] ${item.title}`);
-      console.log(`    PRs: ${prs} — ${item.reason}`);
-      console.log('');
-    }
-  }
 }
 
 export class DoneDetectorRunner {
