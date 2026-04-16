@@ -3,10 +3,8 @@ import chalk from 'chalk';
 import type { Config } from '@cezar/core';
 import type { IssueStore } from '@cezar/core';
 import type { StoredIssue } from '@cezar/core';
-import { GitHubService } from '@cezar/core';
-import { applyPipelineExclusions } from '../../pipeline/close-flag.js';
-import { AutofixOrchestrator, type OrchestratorOutcome } from './orchestrator.js';
-import type { RootCause } from './prompts/analyzer.js';
+import { GitHubService, applyPipelineExclusions, AutofixOrchestrator, type OrchestratorOutcome } from '@cezar/core';
+import type { RootCause } from '@cezar/core';
 import { verboseToggle } from './verbose.js';
 
 export interface AutofixOptions {

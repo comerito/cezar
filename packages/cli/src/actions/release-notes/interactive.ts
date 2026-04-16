@@ -5,7 +5,7 @@ import { execFile } from 'node:child_process';
 import type { Config } from '@cezar/core';
 import type { StoredIssue } from '@cezar/core';
 import { IssueStore } from '@cezar/core';
-import { ReleaseNotesRunner, type ReleaseNotesOptions } from './runner.js';
+import { ReleaseNotesRunner, type ReleaseNotesOptions } from '@cezar/core';
 
 type SelectionMethod = 'date-range' | 'all-closed' | 'pick-issues';
 type OutputDecision = 'copy' | 'save' | 'regenerate' | 'done';

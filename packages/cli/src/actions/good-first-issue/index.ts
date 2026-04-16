@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { GoodFirstIssueRunner, type GoodFirstIssueOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { GoodFirstIssueRunner, type GoodFirstIssueOptions } from '@cezar/core';
 import { GoodFirstIssueInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

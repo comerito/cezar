@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { AutoLabelRunner, type LabelOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { AutoLabelRunner, type LabelOptions } from '@cezar/core';
 import { AutoLabelInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

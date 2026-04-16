@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { DuplicatesRunner, type DuplicateOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { DuplicatesRunner, type DuplicateOptions } from '@cezar/core';
 import { DuplicatesInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

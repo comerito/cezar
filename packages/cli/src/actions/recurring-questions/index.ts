@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { RecurringQuestionRunner, type RecurringQuestionOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { RecurringQuestionRunner, type RecurringQuestionOptions } from '@cezar/core';
 import { RecurringQuestionInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

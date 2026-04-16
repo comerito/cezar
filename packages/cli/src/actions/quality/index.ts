@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { QualityRunner, type QualityOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { QualityRunner, type QualityOptions } from '@cezar/core';
 import { QualityInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

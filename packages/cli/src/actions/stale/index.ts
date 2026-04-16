@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { StaleRunner, type StaleOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { StaleRunner, type StaleOptions } from '@cezar/core';
 import { StaleInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

@@ -1,7 +1,7 @@
 import { select } from '@inquirer/prompts';
 import chalk from 'chalk';
 import type { Config } from '@cezar/core';
-import type { GoodFirstIssueSuggestion, GoodFirstIssueResults } from './runner.js';
+import type { GoodFirstIssueSuggestion, GoodFirstIssueResults } from '@cezar/core';
 import { GitHubService } from '@cezar/core';
 import { postAuditComment } from '@cezar/core';
 import { confirmAction } from '../../ui/components/confirm.js';

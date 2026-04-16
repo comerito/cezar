@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { ContributorWelcomeRunner, findFirstTimeAuthors, type WelcomeOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { ContributorWelcomeRunner, findFirstTimeAuthors, type WelcomeOptions } from '@cezar/core';
 import { ContributorWelcomeInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

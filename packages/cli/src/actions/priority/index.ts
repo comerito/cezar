@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { PriorityRunner, type PriorityOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { PriorityRunner, type PriorityOptions } from '@cezar/core';
 import { PriorityInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

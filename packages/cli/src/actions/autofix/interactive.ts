@@ -1,7 +1,6 @@
 import chalk from 'chalk';
-import type { StoredIssue, Config, IssueStore, ConfirmationPort } from '@cezar/core';
+import type { StoredIssue, Config, IssueStore, ConfirmationPort, RootCause } from '@cezar/core';
 import { AutofixRunner, type AutofixOptions, type AutofixResults } from './runner.js';
-import type { RootCause } from './prompts/analyzer.js';
 import { TerminalConfirmAdapter } from '../../adapters/terminal-confirm.adapter.js';
 
 export class AutofixInteractiveUI {

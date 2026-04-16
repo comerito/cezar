@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import type { Config } from '@cezar/core';
 import { IssueStore } from '@cezar/core';
-import { actionRegistry } from '../actions/registry.js';
+import { actionRegistry } from '@cezar/core';
 
 interface RunOptions {
   state?: string;

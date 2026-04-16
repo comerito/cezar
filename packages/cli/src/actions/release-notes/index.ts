@@ -1,6 +1,6 @@
-import { actionRegistry } from '../registry.js';
+import { actionRegistry } from '@cezar/core';
 import { ReleaseNotesInteractiveUI } from './interactive.js';
-import { ReleaseNotesRunner } from './runner.js';
+import { ReleaseNotesRunner } from '@cezar/core';
 
 actionRegistry.register({
   id: 'release-notes',

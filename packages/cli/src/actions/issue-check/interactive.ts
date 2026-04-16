@@ -1,7 +1,7 @@
 import { select, input } from '@inquirer/prompts';
 import chalk from 'chalk';
 import type { Config } from '@cezar/core';
-import type { IssueCheckResults, IssueCheckMatch } from './runner.js';
+import type { IssueCheckResults, IssueCheckMatch } from '@cezar/core';
 import { GitHubService } from '@cezar/core';
 import { confirmAction } from '../../ui/components/confirm.js';
 import { contentHash } from '@cezar/core';

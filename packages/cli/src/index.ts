@@ -2,14 +2,13 @@
 import 'dotenv/config';
 import { Command } from 'commander';
 import chalk from 'chalk';
-import { loadConfig, IssueStore } from '@cezar/core';
+import { loadConfig, IssueStore, runPipeline } from '@cezar/core';
 import { initCommand } from './commands/init.js';
 import { syncCommand } from './commands/sync.js';
 import { statusCommand } from './commands/status.js';
 import { runCommand } from './commands/run.js';
 import { launchHub } from './ui/hub.js';
 import { VERSION } from './utils/version.js';
-import { runPipeline } from './pipeline/index.js';
 
 // Register all actions (side-effect imports)
 import './actions/duplicates/index.js';

@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { SecurityRunner, type SecurityOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { SecurityRunner, type SecurityOptions } from '@cezar/core';
 import { SecurityInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

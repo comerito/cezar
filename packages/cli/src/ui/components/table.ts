@@ -1,7 +1,6 @@
 import Table from 'cli-table3';
 import chalk from 'chalk';
-import type { StoredIssue } from '@cezar/core';
-import type { DuplicateGroup } from '../../actions/duplicates/runner.js';
+import type { StoredIssue, DuplicateGroup } from '@cezar/core';
 
 export function renderIssueTable(issues: StoredIssue[]): string {
   const table = new Table({

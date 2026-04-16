@@ -1,4 +1,4 @@
-import { actionRegistry } from '../registry.js';
+import { actionRegistry } from '@cezar/core';
 import { AutofixRunner, type AutofixOptions } from './runner.js';
 import { AutofixInteractiveUI } from './interactive.js';
 

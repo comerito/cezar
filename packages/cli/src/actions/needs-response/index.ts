@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { NeedsResponseRunner, type NeedsResponseOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { NeedsResponseRunner, type NeedsResponseOptions } from '@cezar/core';
 import { NeedsResponseInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

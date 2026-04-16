@@ -1,7 +1,7 @@
 import { select, input } from '@inquirer/prompts';
 import chalk from 'chalk';
 import type { Config } from '@cezar/core';
-import type { MissingInfoItem, MissingInfoResults } from './runner.js';
+import type { MissingInfoItem, MissingInfoResults } from '@cezar/core';
 import { GitHubService } from '@cezar/core';
 import { withAuditFooter } from '@cezar/core';
 import { confirmAction } from '../../ui/components/confirm.js';

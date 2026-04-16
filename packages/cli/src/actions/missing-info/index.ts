@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { MissingInfoRunner, type MissingInfoOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { MissingInfoRunner, type MissingInfoOptions } from '@cezar/core';
 import { MissingInfoInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

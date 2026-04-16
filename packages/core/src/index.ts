@@ -53,3 +53,63 @@ export type {
   PreflightSummary,
   RootCausePrompt,
 } from './ports/confirmation.port.js';
+
+// Actions infrastructure
+export type {
+  ActionDefinition,
+  ActionContext,
+  ActionGroup,
+} from './actions/action.interface.js';
+export { actionRegistry } from './actions/registry.js';
+
+// Action runners + prompts
+export * from './actions/auto-label/runner.js';
+export * from './actions/auto-label/prompt.js';
+export * from './actions/bug-detector/runner.js';
+export * from './actions/bug-detector/prompt.js';
+export * from './actions/categorize/runner.js';
+export * from './actions/categorize/prompt.js';
+export * from './actions/claim-detector/runner.js';
+export * from './actions/claim-detector/patterns.js';
+export * from './actions/contributor-welcome/runner.js';
+export * from './actions/contributor-welcome/prompt.js';
+export * from './actions/done-detector/runner.js';
+export * from './actions/done-detector/prompt.js';
+export * from './actions/duplicates/runner.js';
+export * from './actions/duplicates/prompt.js';
+export * from './actions/good-first-issue/runner.js';
+export * from './actions/good-first-issue/prompt.js';
+export * from './actions/issue-check/runner.js';
+export * from './actions/issue-check/prompt.js';
+export * from './actions/milestone-planner/runner.js';
+export * from './actions/milestone-planner/prompt.js';
+export * from './actions/missing-info/runner.js';
+export * from './actions/missing-info/prompt.js';
+export * from './actions/needs-response/runner.js';
+export * from './actions/needs-response/prompt.js';
+export * from './actions/priority/runner.js';
+export * from './actions/priority/prompt.js';
+export * from './actions/quality/runner.js';
+export * from './actions/quality/prompt.js';
+export * from './actions/recurring-questions/runner.js';
+export * from './actions/recurring-questions/prompt.js';
+export * from './actions/release-notes/runner.js';
+export * from './actions/release-notes/prompt.js';
+export * from './actions/security/runner.js';
+export * from './actions/security/prompt.js';
+export * from './actions/stale/runner.js';
+export * from './actions/stale/prompt.js';
+
+// Autofix internals (orchestrator + agent session). The CLI still owns the
+// terminal-facing AutofixRunner + verbose toggle.
+export * from './actions/autofix/orchestrator.js';
+export * from './actions/autofix/agent-session.js';
+export * from './actions/autofix/token-budget.js';
+export * from './actions/autofix/worktree.js';
+export * from './actions/autofix/skills.js';
+export * from './actions/autofix/prompts/analyzer.js';
+export * from './actions/autofix/prompts/fixer.js';
+export * from './actions/autofix/prompts/reviewer.js';
+
+// Pipeline
+export * from './pipeline/index.js';

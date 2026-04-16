@@ -1,6 +1,6 @@
 import { input } from '@inquirer/prompts';
-import { actionRegistry } from '../registry.js';
-import { IssueCheckRunner, type IssueCheckOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { IssueCheckRunner, type IssueCheckOptions } from '@cezar/core';
 import { IssueCheckInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

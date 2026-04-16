@@ -1,6 +1,6 @@
 import { select } from '@inquirer/prompts';
 import chalk from 'chalk';
-import type { BugClassification, BugDetectorResults } from './runner.js';
+import type { BugClassification, BugDetectorResults } from '@cezar/core';
 
 type Decision = 'keep' | 'override' | 'skip' | 'stop';
 

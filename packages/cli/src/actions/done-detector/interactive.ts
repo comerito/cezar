@@ -1,7 +1,7 @@
 import { select } from '@inquirer/prompts';
 import chalk from 'chalk';
 import type { Config } from '@cezar/core';
-import type { DoneIssueResult, DoneDetectorResults } from './runner.js';
+import type { DoneIssueResult, DoneDetectorResults } from '@cezar/core';
 import { GitHubService } from '@cezar/core';
 import { withAuditFooter } from '@cezar/core';
 import { postAuditComment } from '@cezar/core';

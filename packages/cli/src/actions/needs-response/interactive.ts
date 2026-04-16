@@ -1,7 +1,7 @@
 import { select } from '@inquirer/prompts';
 import chalk from 'chalk';
 import type { Config } from '@cezar/core';
-import type { NeedsResponseItem, NeedsResponseResults } from './runner.js';
+import type { NeedsResponseItem, NeedsResponseResults } from '@cezar/core';
 import { GitHubService } from '@cezar/core';
 import { confirmAction } from '../../ui/components/confirm.js';
 import { execFile } from 'node:child_process';

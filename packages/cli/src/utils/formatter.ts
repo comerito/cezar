@@ -1,7 +1,7 @@
 import Table from 'cli-table3';
 import chalk from 'chalk';
 import type { StoredIssue } from '@cezar/core';
-import type { DuplicateGroup } from '../actions/duplicates/runner.js';
+import type { DuplicateGroup } from '@cezar/core';
 import type { IssueStore } from '@cezar/core';
 
 export type OutputFormat = 'table' | 'json' | 'markdown';

@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { BugDetectorRunner, type BugDetectorOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { BugDetectorRunner, type BugDetectorOptions } from '@cezar/core';
 import { BugDetectorInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

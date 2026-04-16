@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { ClaimDetectorRunner, type ClaimDetectorOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { ClaimDetectorRunner, type ClaimDetectorOptions } from '@cezar/core';
 import { ClaimDetectorInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

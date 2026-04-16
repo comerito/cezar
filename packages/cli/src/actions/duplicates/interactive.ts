@@ -1,7 +1,7 @@
 import { select } from '@inquirer/prompts';
 import chalk from 'chalk';
 import type { Config } from '@cezar/core';
-import type { DuplicateGroup, DuplicateResults } from './runner.js';
+import type { DuplicateGroup, DuplicateResults } from '@cezar/core';
 import { GitHubService } from '@cezar/core';
 import { postAuditComment } from '@cezar/core';
 import { renderDuplicateGroup } from '../../ui/components/table.js';

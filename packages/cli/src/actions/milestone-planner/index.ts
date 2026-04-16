@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { MilestonePlanRunner } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { MilestonePlanRunner } from '@cezar/core';
 import { MilestonePlanInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

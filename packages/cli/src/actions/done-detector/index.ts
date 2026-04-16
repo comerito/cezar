@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { DoneDetectorRunner, type DoneDetectorOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { DoneDetectorRunner, type DoneDetectorOptions } from '@cezar/core';
 import { DoneDetectorInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

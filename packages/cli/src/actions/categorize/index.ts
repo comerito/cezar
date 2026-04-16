@@ -1,5 +1,5 @@
-import { actionRegistry } from '../registry.js';
-import { CategorizeRunner, type CategorizeOptions } from './runner.js';
+import { actionRegistry } from '@cezar/core';
+import { CategorizeRunner, type CategorizeOptions } from '@cezar/core';
 import { CategorizeInteractiveUI } from './interactive.js';
 
 actionRegistry.register({

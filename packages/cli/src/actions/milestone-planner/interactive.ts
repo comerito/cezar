@@ -3,7 +3,7 @@ import chalk from 'chalk';
 import { writeFile } from 'node:fs/promises';
 import type { Config } from '@cezar/core';
 import { IssueStore } from '@cezar/core';
-import { MilestonePlanRunner, type MilestoneSuggestion, type MilestonePlanResults } from './runner.js';
+import { MilestonePlanRunner, type MilestoneSuggestion, type MilestonePlanResults } from '@cezar/core';
 
 type OutputDecision = 'save' | 'regenerate' | 'done';
 

@@ -3,12 +3,12 @@ import chalk from 'chalk';
 import { clearScreen, renderLogo } from './logo.js';
 import { renderStatusBox } from './status.js';
 import { runSetupWizard } from './setup.js';
-import { actionRegistry } from '../actions/registry.js';
-import type { ActionDefinition, ActionGroup } from '../actions/action.interface.js';
+import { actionRegistry } from '@cezar/core';
+import type { ActionDefinition, ActionGroup } from '@cezar/core';
 import { IssueStore } from '@cezar/core';
 import type { Config } from '@cezar/core';
 import { syncCommand } from '../commands/sync.js';
-import { runPipeline } from '../pipeline/index.js';
+import { runPipeline } from '@cezar/core';
 
 export async function launchHub(store: IssueStore | null, config: Config): Promise<void> {
   // First launch — run setup wizard if no store exists

@@ -1,7 +1,7 @@
 import chalk from 'chalk';
 import { emitKeypressEvents } from 'node:readline';
 import type { Ora } from 'ora';
-import type { AgentEvent } from './agent-session.js';
+import type { AgentEvent } from '@cezar/core';
 
 /**
  * Toggleable live-trace of agent activity. While active, pressing Ctrl+O
