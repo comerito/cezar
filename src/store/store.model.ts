@@ -68,6 +68,12 @@ export const IssueAnalysisSchema = z.object({
   needsResponseReason: z.string().nullable().default(null),
   needsResponseAnalyzedAt: z.string().nullable().default(null),
 
+  // Categorize action
+  featureCategory: z.enum(['framework', 'domain', 'integration']).nullable().default(null),
+  featureCategoryReason: z.string().nullable().default(null),
+  featureCategoryAnalyzedAt: z.string().nullable().default(null),
+  featureCategoryAppliedAt: z.string().nullable().default(null),
+
   // Done detector action
   doneDetected: z.boolean().nullable().default(null),
   doneConfidence: z.number().min(0).max(1).nullable().default(null),
@@ -78,6 +84,26 @@ export const IssueAnalysisSchema = z.object({
     prTitle: z.string(),
   })).nullable().default(null),
   doneAnalyzedAt: z.string().nullable().default(null),
+
+  // Bug detector action
+  issueType: z.enum(['bug', 'feature', 'question', 'other']).nullable().default(null),
+  bugConfidence: z.number().min(0).max(1).nullable().default(null),
+  bugReason: z.string().nullable().default(null),
+  bugAnalyzedAt: z.string().nullable().default(null),
+
+  // Autofix action
+  autofixStatus: z.enum(['pending', 'running', 'succeeded', 'failed', 'skipped', 'pr-opened']).nullable().default(null),
+  autofixAttempts: z.number().default(0),
+  autofixLastRunAt: z.string().nullable().default(null),
+  autofixBranch: z.string().nullable().default(null),
+  autofixPrUrl: z.string().nullable().default(null),
+  autofixPrNumber: z.number().nullable().default(null),
+  autofixRootCause: z.string().nullable().default(null),
+  autofixReviewVerdict: z.enum(['pass', 'fail']).nullable().default(null),
+  autofixReviewNotes: z.string().nullable().default(null),
+  autofixWorktreePath: z.string().nullable().default(null),
+  autofixTokensUsed: z.number().default(0),
+  autofixLastError: z.string().nullable().default(null),
 });
 
 export type IssueAnalysis = z.infer<typeof IssueAnalysisSchema>;

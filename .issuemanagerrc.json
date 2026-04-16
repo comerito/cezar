@@ -1,0 +1,25 @@
+{
+  "github": {
+    "owner": "open-mercato",
+    "repo": "open-mercato"
+  },
+  "autofix": {
+    "enabled": true,
+    "repoRoot": "/home/pat-lewczuk/projects/open-mercato",
+    "tokenBudgetPerAttempt": 7500000,
+    "maxAttemptsPerIssue": 10,
+    "retryOnReviewFailure": true,
+    "baseBranch": "develop",
+    "minAnalyzerConfidence": 0.5,
+    "models": {
+      "analyzer": "claude-sonnet-4-20250514",
+      "fixer": "claude-sonnet-4-20250514",
+      "reviewer": "claude-haiku-4-5-20251001"
+    },
+    "maxTurns": {
+      "analyzer": 150,
+      "fixer": 300,
+      "reviewer": 100
+    }
+  }
+}

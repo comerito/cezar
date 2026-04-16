@@ -5,16 +5,21 @@ import { actionRegistry } from '../actions/registry.js';
 import { getCloseFlaggedIssueNumbers } from './close-flag.js';
 
 const CLOSE_DETECTION_ACTION_IDS = ['duplicates', 'done-detector'];
+const ACT_PHASE_ACTION_IDS = ['autofix'];
 
 export interface PipelineOptions {
   recheck?: boolean;
   dryRun?: boolean;
   interactive?: boolean;
+  autofix?: boolean;
+  apply?: boolean;
+  maxIssues?: number;
 }
 
 export interface PipelineResult {
   phase1Actions: string[];
   phase2Actions: string[];
+  phase3Actions: string[];
   closeFlaggedCount: number;
   errors: Array<{ actionId: string; error: Error }>;
 }
@@ -27,11 +32,16 @@ export async function runPipeline(
   const allActions = actionRegistry.getAll();
 
   const phase1 = allActions.filter(a => CLOSE_DETECTION_ACTION_IDS.includes(a.id));
-  const phase2 = allActions.filter(a => !CLOSE_DETECTION_ACTION_IDS.includes(a.id));
+  const phase2 = allActions.filter(a =>
+    !CLOSE_DETECTION_ACTION_IDS.includes(a.id) &&
+    !ACT_PHASE_ACTION_IDS.includes(a.id),
+  );
+  const phase3 = allActions.filter(a => ACT_PHASE_ACTION_IDS.includes(a.id));
 
   const result: PipelineResult = {
     phase1Actions: [],
     phase2Actions: [],
+    phase3Actions: [],
     closeFlaggedCount: 0,
     errors: [],
   };
@@ -103,10 +113,47 @@ export async function runPipeline(
     }
   }
 
+  // --- Phase 3: Act (opt-in) ---
+  if (options.autofix && phase3.length > 0) {
+    console.log(chalk.bold('\n── Phase 3: Act ──\n'));
+
+    for (const action of phase3) {
+      const availability = action.isAvailable(store);
+      if (availability !== true) {
+        console.log(chalk.dim(`  Skipping ${action.label}: ${availability}`));
+        continue;
+      }
+
+      console.log(chalk.cyan(`  Running ${action.icon}  ${action.label}...`));
+      try {
+        await action.run({
+          store,
+          config,
+          interactive: options.interactive ?? false,
+          options: {
+            recheck: options.recheck ?? false,
+            dryRun: options.dryRun ?? false,
+            apply: options.apply ?? false,
+            maxIssues: options.maxIssues,
+            excludeIssues,
+          },
+        });
+        result.phase3Actions.push(action.id);
+      } catch (error) {
+        const err = error instanceof Error ? error : new Error(String(error));
+        console.error(chalk.red(`  Error in ${action.id}: ${err.message}`));
+        result.errors.push({ actionId: action.id, error: err });
+      }
+    }
+  }
+
   // --- Summary ---
   console.log(chalk.bold('\n── Pipeline Summary ──\n'));
   console.log(`  Phase 1: ${result.phase1Actions.length} action(s) ran`);
   console.log(`  Phase 2: ${result.phase2Actions.length} action(s) ran`);
+  if (options.autofix) {
+    console.log(`  Phase 3: ${result.phase3Actions.length} action(s) ran`);
+  }
   console.log(`  Close-flagged: ${result.closeFlaggedCount} issue(s)`);
   if (result.errors.length > 0) {
     console.log(chalk.red(`  Errors: ${result.errors.length}`));
