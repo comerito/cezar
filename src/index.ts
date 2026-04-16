@@ -28,6 +28,9 @@ import './actions/done-detector/index.js';
 import './actions/claim-detector/index.js';
 import './actions/needs-response/index.js';
 import './actions/issue-check/index.js';
+import './actions/categorize/index.js';
+import './actions/bug-detector/index.js';
+import './actions/autofix/index.js';
 
 const program = new Command()
   .name('cezar')
@@ -78,16 +81,22 @@ program.command('run <action>')
   .option('--format <format>', 'table|json|markdown', 'table')
   .option('--no-interactive', 'Force non-interactive mode')
   .option('--description <text>', 'Issue description (for issue-check action)')
+  .option('--issue <n>', 'Target a single issue number (for autofix)', v => parseInt(v, 10))
+  .option('--max-issues <n>', 'Limit how many issues to process (for autofix)', v => parseInt(v, 10))
+  .option('--retry', 'Reset attempt counter before running (autofix): lets a previously-exhausted issue be re-tried')
   .action(async (actionId, opts) => {
     const config = await loadConfig();
     await runCommand(actionId, opts, config);
   });
 
 program.command('pipeline')
-  .description('Run full pipeline: close-detection first, then enrichment with exclusions')
+  .description('Run full pipeline: close-detection, enrichment, optional autofix')
   .option('--recheck', 'Re-analyze already-analyzed issues')
   .option('--dry-run', 'Show what would happen without writing')
   .option('--no-interactive', 'Force non-interactive mode')
+  .option('--autofix', 'Include Phase 3 (autofix) — opens draft PRs for detected bugs')
+  .option('--apply', 'Required alongside --autofix to actually push branches and open PRs')
+  .option('--max-issues <n>', 'Limit autofix to N issues this run', v => parseInt(v, 10))
   .action(async (opts) => {
     const config = await loadConfig();
     const store = await IssueStore.loadOrNull(config.store.path);
@@ -99,6 +108,9 @@ program.command('pipeline')
       recheck: opts.recheck ?? false,
       dryRun: opts.dryRun ?? false,
       interactive: opts.interactive !== false && process.stdout.isTTY === true,
+      autofix: opts.autofix === true,
+      apply: opts.apply === true,
+      maxIssues: typeof opts.maxIssues === 'number' ? opts.maxIssues : undefined,
     });
   });
 

@@ -11,6 +11,9 @@ interface RunOptions {
   format?: string;
   interactive?: boolean;
   description?: string;
+  issue?: number;
+  maxIssues?: number;
+  retry?: boolean;
 }
 
 export async function runCommand(actionId: string, opts: RunOptions, config: Config): Promise<void> {
@@ -46,6 +49,9 @@ export async function runCommand(actionId: string, opts: RunOptions, config: Con
       dryRun: opts.dryRun ?? false,
       format: opts.format ?? 'table',
       description: opts.description,
+      issue: opts.issue,
+      maxIssues: opts.maxIssues,
+      retry: opts.retry ?? false,
     },
   });
 }

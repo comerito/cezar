@@ -1,6 +1,10 @@
 import { Octokit } from '@octokit/rest';
+import { execFile } from 'node:child_process';
+import { promisify } from 'node:util';
 import type { Config } from '../models/config.model.js';
 import { contentHash } from '../utils/hash.js';
+
+const execFileAsync = promisify(execFile);
 
 export interface RawIssue {
   number: number;
@@ -288,6 +292,136 @@ export class GitHubService {
         body: c.body ?? '',
         createdAt: c.created_at,
       }));
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async getIssueWithComments(issueNumber: number): Promise<{
+    issue: {
+      number: number;
+      title: string;
+      body: string;
+      state: 'open' | 'closed';
+      labels: string[];
+      author: string;
+      htmlUrl: string;
+      createdAt: string;
+      updatedAt: string;
+    };
+    comments: Array<{ author: string; body: string; createdAt: string }>;
+  }> {
+    try {
+      const [issueResp, comments] = await Promise.all([
+        this.octokit.rest.issues.get({
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: issueNumber,
+        }),
+        this.getIssueComments(issueNumber),
+      ]);
+
+      const raw = issueResp.data;
+      return {
+        issue: {
+          number: raw.number,
+          title: raw.title,
+          body: raw.body ?? '',
+          state: raw.state === 'closed' ? 'closed' : 'open',
+          labels: raw.labels.map(l => (typeof l === 'string' ? l : l.name ?? '')).filter(Boolean),
+          author: raw.user?.login ?? 'unknown',
+          htmlUrl: raw.html_url,
+          createdAt: raw.created_at,
+          updatedAt: raw.updated_at,
+        },
+        comments,
+      };
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async getBaseBranchSha(branch: string): Promise<string> {
+    try {
+      const response = await this.octokit.rest.repos.getBranch({
+        owner: this.owner,
+        repo: this.repo,
+        branch,
+      });
+      return response.data.commit.sha;
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async createRemoteBranch(branch: string, fromSha: string): Promise<void> {
+    try {
+      await this.octokit.rest.git.createRef({
+        owner: this.owner,
+        repo: this.repo,
+        ref: `refs/heads/${branch}`,
+        sha: fromSha,
+      });
+    } catch (error) {
+      // 422 = ref already exists; treat as no-op so re-runs are idempotent
+      if (error && typeof error === 'object' && 'status' in error && (error as { status: number }).status === 422) {
+        return;
+      }
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async pushBranch(branch: string, localRepoPath: string, remote = 'origin'): Promise<void> {
+    try {
+      await execFileAsync('git', ['push', '--set-upstream', remote, branch], {
+        cwd: localRepoPath,
+      });
+    } catch (error) {
+      const msg = error instanceof Error ? error.message : String(error);
+      throw new Error(`git push ${remote} ${branch} failed: ${msg}`);
+    }
+  }
+
+  async createPullRequest(opts: {
+    title: string;
+    body: string;
+    head: string;
+    base: string;
+    draft?: boolean;
+    labels?: string[];
+  }): Promise<{ url: string; number: number }> {
+    try {
+      const response = await this.octokit.rest.pulls.create({
+        owner: this.owner,
+        repo: this.repo,
+        title: opts.title,
+        body: opts.body,
+        head: opts.head,
+        base: opts.base,
+        draft: opts.draft ?? true,
+      });
+
+      const prNumber = response.data.number;
+
+      if (opts.labels && opts.labels.length > 0) {
+        await this.octokit.rest.issues.addLabels({
+          owner: this.owner,
+          repo: this.repo,
+          issue_number: prNumber,
+          labels: opts.labels,
+        }).catch(() => {
+          // Label attach is best-effort; don't fail the PR opening on a missing label
+        });
+      }
+
+      return {
+        url: response.data.html_url,
+        number: prNumber,
+      };
     } catch (error) {
       this.handleError(error);
       throw error;
