@@ -43,3 +43,13 @@ export {
 export { chunkArray } from './utils/chunker.js';
 export { contentHash } from './utils/hash.js';
 export { formatCommentsForPrompt } from './utils/comment-formatter.js';
+
+// Ports
+export type { StorePort } from './ports/store.port.js';
+export type { EventPort, AgentEvent } from './ports/event.port.js';
+export type { ConfigPort } from './ports/config.port.js';
+export type {
+  ConfirmationPort,
+  PreflightSummary,
+  RootCausePrompt,
+} from './ports/confirmation.port.js';

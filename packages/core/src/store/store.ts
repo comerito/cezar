@@ -2,6 +2,7 @@ import { readFile, writeFile, rename, mkdir, unlink } from 'node:fs/promises';
 import { join, dirname } from 'node:path';
 import { randomUUID } from 'node:crypto';
 import { StoreSchema, StoredIssueSchema, IssueAnalysisSchema, type Store, type StoredIssue, type StoredComment, type IssueAnalysis, type IssueDigest, type StoreMeta } from './store.model.js';
+import type { StorePort } from '../ports/store.port.js';
 
 export interface IssueFilter {
   state?: 'open' | 'closed' | 'all';
@@ -11,10 +12,21 @@ export interface IssueFilter {
 export class IssueStore {
   private data: Store;
   private filePath: string;
+  private port: StorePort | null;
 
-  private constructor(data: Store, filePath: string) {
+  private constructor(data: Store, filePath: string, port: StorePort | null = null) {
     this.data = data;
     this.filePath = filePath;
+    this.port = port;
+  }
+
+  /**
+   * Construct an IssueStore from a custom StorePort (e.g. a Supabase-backed
+   * store for the GUI). The port owns persistence; `save()` delegates to it.
+   */
+  static async fromPort(port: StorePort): Promise<IssueStore> {
+    const data = await port.load();
+    return new IssueStore(data, '', port);
   }
 
   static async init(storePath: string, meta: { owner: string; repo: string }): Promise<IssueStore> {
@@ -53,6 +65,10 @@ export class IssueStore {
   }
 
   async save(): Promise<void> {
+    if (this.port) {
+      await this.port.save(this.data);
+      return;
+    }
     const dir = dirname(this.filePath);
     await mkdir(dir, { recursive: true });
     const tmpPath = `${this.filePath}.${randomUUID()}.tmp`;

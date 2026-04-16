@@ -1,16 +1,19 @@
-import { confirm, select } from '@inquirer/prompts';
 import chalk from 'chalk';
-import type { StoredIssue } from '@cezar/core';
-import type { Config } from '@cezar/core';
-import type { IssueStore } from '@cezar/core';
+import type { StoredIssue, Config, IssueStore, ConfirmationPort } from '@cezar/core';
 import { AutofixRunner, type AutofixOptions, type AutofixResults } from './runner.js';
 import type { RootCause } from './prompts/analyzer.js';
+import { TerminalConfirmAdapter } from '../../adapters/terminal-confirm.adapter.js';
 
 export class AutofixInteractiveUI {
+  private readonly confirmation: ConfirmationPort;
+
   constructor(
     private readonly store: IssueStore,
     private readonly config: Config,
-  ) {}
+    confirmation?: ConfirmationPort,
+  ) {
+    this.confirmation = confirmation ?? new TerminalConfirmAdapter();
+  }
 
   async present(options: AutofixOptions): Promise<AutofixResults> {
     const cfg = this.config.autofix;
@@ -24,21 +27,14 @@ export class AutofixInteractiveUI {
     }
 
     const apply = options.apply === true && !options.dryRun;
-    console.log('');
-    console.log(chalk.bold('Autofix preflight'));
-    console.log('─'.repeat(55));
-    console.log(`  Repo root:   ${cfg.repoRoot}`);
-    console.log(`  Base branch: ${cfg.baseBranch}`);
-    console.log(`  Mode:        ${apply ? chalk.green('APPLY') : chalk.cyan('DRY-RUN')}`);
-    console.log(`  Max attempts per issue: ${cfg.maxAttemptsPerIssue}`);
-    console.log(`  Token budget per attempt: ${cfg.tokenBudgetPerAttempt.toLocaleString()}`);
-    console.log('');
 
-    const proceed = await confirm({
-      message: apply
-        ? 'Proceed? This WILL push branches and open draft PRs for bug issues.'
-        : 'Proceed with dry-run? No branches will be pushed.',
-      default: !apply,
+    const proceed = await this.confirmation.confirmPreflight({
+      repoRoot: cfg.repoRoot,
+      baseBranch: cfg.baseBranch,
+      mode: apply ? 'apply' : 'dry-run',
+      maxAttemptsPerIssue: cfg.maxAttemptsPerIssue,
+      tokenBudgetPerAttempt: cfg.tokenBudgetPerAttempt,
+      eligibleIssueCount: this.store.getIssues({ state: 'open' }).length,
     });
     if (!proceed) {
       return new AutofixRunner(this.store, this.config).run({ ...options, maxIssues: 0 });
@@ -57,22 +53,12 @@ export class AutofixInteractiveUI {
   }
 
   private async confirmRootCause(rootCause: RootCause, issue: StoredIssue): Promise<boolean> {
-    console.log('');
-    console.log(chalk.bold(`Root-cause analysis for #${issue.number}`));
-    console.log('─'.repeat(55));
-    console.log(`  Title:      ${issue.title}`);
-    console.log(`  Summary:    ${rootCause.summary}`);
-    console.log(`  Hypothesis: ${rootCause.hypothesis}`);
-    console.log(`  Confidence: ${rootCause.confidence.toFixed(2)}`);
-    console.log(`  Suspected:  ${rootCause.suspectedFiles.join(', ') || '(none)'}`);
-    console.log('');
-
-    const decision = await select<'proceed' | 'skip'>({
-      message: 'Proceed with fix implementation?',
-      choices: [
-        { name: 'Proceed — let the fixer agent make the change', value: 'proceed' },
-        { name: 'Skip this issue', value: 'skip' },
-      ],
+    const decision = await this.confirmation.confirmRootCause({
+      issueNumber: issue.number,
+      issueTitle: issue.title,
+      rootCause: `${rootCause.summary}\n  Hypothesis: ${rootCause.hypothesis}`,
+      confidence: rootCause.confidence,
+      evidence: rootCause.suspectedFiles,
     });
     return decision === 'proceed';
   }
