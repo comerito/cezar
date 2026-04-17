@@ -1,6 +1,5 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { StorePort, Store, StoredIssue } from '@cezar/core';
-import { StoreSchema } from '@cezar/core';
 import type { Database } from '../supabase/types';
 
 type WorkspaceRow = Database['public']['Tables']['workspaces']['Row'];
@@ -36,6 +35,7 @@ export class SupabaseStoreAdapter implements StorePort {
       issues: (issues ?? []).map(rowToIssue),
     };
 
+    const { StoreSchema } = await import('@cezar/core');
     return StoreSchema.parse(store);
   }
 
