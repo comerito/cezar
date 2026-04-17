@@ -10,6 +10,8 @@ const NAV = [
   { href: '/dashboard', label: 'Dashboard' },
   { href: '/issues',    label: 'Issues' },
   { href: '/flows',     label: 'My Flows' },
+  { href: '/analytics', label: 'Analytics' },
+  { href: '/activity',  label: 'Activity' },
   { href: '/settings',  label: 'Settings' },
 ];
 
