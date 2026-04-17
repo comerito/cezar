@@ -2,6 +2,7 @@ import { ActionGrid } from '@/components/action-grid';
 import { ACTION_TILES } from '@/data/actions';
 import { getActiveWorkspace } from '@/lib/workspace';
 import { loadWorkspaceBadges } from './load-badges';
+import { SyncButton } from './sync-button';
 
 export default async function DashboardPage() {
   const workspace = await getActiveWorkspace();
@@ -17,16 +18,19 @@ export default async function DashboardPage() {
             {workspace && <> — {workspace.repoOwner}/{workspace.repoName}</>}
           </p>
         </div>
-        {workspace && badges && (
-          <div className="text-xs text-fg-subtle">
-            workspace: {workspace.slug}
-          </div>
-        )}
-        {!workspace && (
-          <div className="text-xs text-fg-subtle">
-            no workspace connected
-          </div>
-        )}
+        <div className="flex items-center gap-4">
+          {workspace && <SyncButton />}
+          {workspace && (
+            <div className="text-xs text-fg-subtle">
+              workspace: {workspace.slug}
+            </div>
+          )}
+          {!workspace && (
+            <div className="text-xs text-fg-subtle">
+              no workspace connected
+            </div>
+          )}
+        </div>
       </header>
       <ActionGrid badges={badges} />
     </div>
