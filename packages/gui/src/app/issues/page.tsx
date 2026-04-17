@@ -1,72 +1,48 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { SupabaseStoreAdapter } from '@/lib/adapters/supabase-store';
+import { getActiveWorkspace } from '@/lib/workspace';
 import type { StoredIssue } from '@cezar/core';
 
-type LoadResult =
-  | { kind: 'ok'; issues: StoredIssue[]; owner: string; repo: string }
-  | { kind: 'empty' }
-  | { kind: 'error'; message: string };
+export default async function IssuesPage() {
+  const workspace = await getActiveWorkspace();
 
-async function loadFirstWorkspaceIssues(): Promise<LoadResult> {
+  if (!workspace) {
+    return (
+      <div className="px-8 py-6">
+        <header className="mb-6 border-b border-border pb-5">
+          <h1 className="text-2xl font-semibold tracking-tight">Issues</h1>
+        </header>
+        <EmptyState title="No workspace connected" body="Create a workspace first." />
+      </div>
+    );
+  }
+
+  let issues: StoredIssue[] = [];
+  let loadError: string | null = null;
+
   try {
     const supabase = await createSupabaseServerClient();
-    const { data: workspaces, error } = await supabase
-      .from('workspaces')
-      .select('id, repo_owner, repo_name')
-      .limit(1);
-    if (error) return { kind: 'error', message: error.message };
-    const workspace = workspaces?.[0];
-    if (!workspace) return { kind: 'empty' };
-
     const adapter = new SupabaseStoreAdapter(supabase, workspace.id);
     const store = await adapter.load();
-    return { kind: 'ok', issues: store.issues, owner: workspace.repo_owner, repo: workspace.repo_name };
+    issues = store.issues;
   } catch (err) {
-    return { kind: 'error', message: (err as Error).message };
+    loadError = (err as Error).message;
   }
-}
-
-export default async function IssuesPage() {
-  const result = await loadFirstWorkspaceIssues();
 
   return (
     <div className="px-8 py-6">
       <header className="mb-6 border-b border-border pb-5">
         <h1 className="text-2xl font-semibold tracking-tight">Issues</h1>
         <p className="mt-1 text-sm text-fg-muted">
-          {result.kind === 'ok'
-            ? `${result.owner}/${result.repo} — ${result.issues.length} issues`
-            : result.kind === 'empty'
-              ? 'No workspace connected yet.'
-              : `Unable to load workspace: ${result.message}`}
+          {workspace.repoOwner}/{workspace.repoName} — {issues.length} issues
         </p>
       </header>
 
-      {result.kind === 'ok' && result.issues.length > 0 && (
-        <IssueTable issues={result.issues} />
+      {loadError && <EmptyState title="Load failed" body={loadError} tone="danger" />}
+      {!loadError && issues.length === 0 && (
+        <EmptyState title="No issues yet" body="Sync issues to the workspace to see them here." />
       )}
-
-      {result.kind === 'ok' && result.issues.length === 0 && (
-        <EmptyState
-          title="No issues yet"
-          body="Run `cezar init` against the workspace repo to pull issues, then they'll appear here."
-        />
-      )}
-
-      {result.kind === 'empty' && (
-        <EmptyState
-          title="No workspace connected"
-          body="Create a workspace row in Supabase and link it to a GitHub repo. Workspace CRUD UI lands in Phase 1."
-        />
-      )}
-
-      {result.kind === 'error' && (
-        <EmptyState
-          title="Load failed"
-          body={result.message}
-          tone="danger"
-        />
-      )}
+      {!loadError && issues.length > 0 && <IssueTable issues={issues} />}
     </div>
   );
 }
@@ -82,6 +58,7 @@ function IssueTable({ issues }: { issues: StoredIssue[] }) {
             <th className="px-4 py-3">State</th>
             <th className="px-4 py-3">Priority</th>
             <th className="px-4 py-3">Type</th>
+            <th className="px-4 py-3">Labels</th>
             <th className="px-4 py-3">Comments</th>
           </tr>
         </thead>
@@ -89,7 +66,7 @@ function IssueTable({ issues }: { issues: StoredIssue[] }) {
           {issues.map((issue) => (
             <tr key={issue.number} className="bg-bg hover:bg-bg-elevated">
               <td className="px-4 py-3 font-mono text-fg-muted">#{issue.number}</td>
-              <td className="px-4 py-3">
+              <td className="max-w-md px-4 py-3">
                 <a href={issue.htmlUrl} target="_blank" rel="noreferrer" className="hover:text-accent">
                   {issue.title}
                 </a>
@@ -99,14 +76,58 @@ function IssueTable({ issues }: { issues: StoredIssue[] }) {
                   {issue.state}
                 </span>
               </td>
-              <td className="px-4 py-3 text-fg-muted">{issue.analysis.priority ?? '—'}</td>
-              <td className="px-4 py-3 text-fg-muted">{issue.analysis.issueType ?? '—'}</td>
+              <td className="px-4 py-3">
+                <PriorityChip priority={issue.analysis.priority} />
+              </td>
+              <td className="px-4 py-3">
+                <TypeChip type={issue.analysis.issueType} confidence={issue.analysis.bugConfidence} />
+              </td>
+              <td className="max-w-[180px] px-4 py-3">
+                <div className="flex flex-wrap gap-1">
+                  {issue.labels.slice(0, 3).map((l) => (
+                    <span key={l} className="rounded-full bg-bg-subtle px-2 py-0.5 text-[10px] text-fg-muted">
+                      {l}
+                    </span>
+                  ))}
+                  {issue.labels.length > 3 && (
+                    <span className="text-[10px] text-fg-subtle">+{issue.labels.length - 3}</span>
+                  )}
+                </div>
+              </td>
               <td className="px-4 py-3 text-fg-muted">{issue.commentCount}</td>
             </tr>
           ))}
         </tbody>
       </table>
     </div>
+  );
+}
+
+const PRIORITY_COLORS: Record<string, string> = {
+  critical: 'bg-danger/20 text-danger',
+  high: 'bg-orange-500/20 text-orange-400',
+  medium: 'bg-yellow-500/20 text-yellow-400',
+  low: 'bg-fg-subtle/20 text-fg-subtle',
+};
+
+function PriorityChip({ priority }: { priority: string | null | undefined }) {
+  if (!priority) return <span className="text-fg-subtle">—</span>;
+  return (
+    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ${PRIORITY_COLORS[priority] ?? ''}`}>
+      {priority}
+    </span>
+  );
+}
+
+const TYPE_ICONS: Record<string, string> = { bug: '🐛', feature: '✨', question: '❓', other: '📦' };
+
+function TypeChip({ type, confidence }: { type: string | null | undefined; confidence: number | null | undefined }) {
+  if (!type) return <span className="text-fg-subtle">—</span>;
+  return (
+    <span className="inline-flex items-center gap-1 text-xs text-fg-muted">
+      {TYPE_ICONS[type] ?? ''} {type}
+      {confidence != null && <span className="text-[10px] text-fg-subtle">({Math.round(confidence * 100)}%)</span>}
+    </span>
   );
 }
 

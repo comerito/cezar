@@ -1,9 +1,14 @@
 import { ACTION_GROUP_LABELS, ACTION_TILES, type ActionGroup, type ActionTile } from '@/data/actions';
+import type { ActionBadge } from '@/lib/badges';
 import { cn } from './ui/cn';
 
 const GROUP_ORDER: ActionGroup[] = ['triage', 'intelligence', 'community', 'release'];
 
-export function ActionGrid() {
+interface ActionGridProps {
+  badges?: Record<string, ActionBadge>;
+}
+
+export function ActionGrid({ badges }: ActionGridProps) {
   return (
     <div className="flex flex-col gap-8">
       {GROUP_ORDER.map((group) => {
@@ -16,7 +21,7 @@ export function ActionGrid() {
             </h2>
             <div className="grid grid-cols-[repeat(auto-fill,minmax(220px,1fr))] gap-3">
               {tiles.map((tile) => (
-                <ActionTileCard key={tile.id} tile={tile} />
+                <ActionTileCard key={tile.id} tile={tile} badge={badges?.[tile.id]} />
               ))}
             </div>
           </section>
@@ -26,13 +31,17 @@ export function ActionGrid() {
   );
 }
 
-function ActionTileCard({ tile }: { tile: ActionTile }) {
+function ActionTileCard({ tile, badge }: { tile: ActionTile; badge?: ActionBadge }) {
+  const disabled = badge && badge.available !== true;
+
   return (
     <div
       className={cn(
-        'group relative flex flex-col gap-2 rounded-lg border border-border bg-bg-elevated p-4 transition-colors hover:border-accent/40',
-        tile.flag === 'headline' && 'border-accent/30',
+        'group relative flex flex-col gap-2 rounded-lg border border-border bg-bg-elevated p-4 transition-colors',
+        disabled ? 'opacity-50' : 'hover:border-accent/40',
+        tile.flag === 'headline' && !disabled && 'border-accent/30',
       )}
+      title={disabled ? String(badge!.available) : undefined}
     >
       <div className="flex items-center justify-between">
         <span className="text-xl" aria-hidden>{tile.icon}</span>
@@ -44,7 +53,18 @@ function ActionTileCard({ tile }: { tile: ActionTile }) {
       </div>
       <div className="text-sm font-medium text-fg">{tile.label}</div>
       <div className="text-xs leading-snug text-fg-muted">{tile.description}</div>
-      <div className="mt-1 text-[11px] text-fg-subtle">id: {tile.id}</div>
+      {badge ? (
+        <div className={cn(
+          'mt-1 text-[11px]',
+          badge.badge === 'up to date' || badge.badge === 'nothing to fix'
+            ? 'text-fg-subtle'
+            : 'text-accent',
+        )}>
+          {badge.badge}
+        </div>
+      ) : (
+        <div className="mt-1 text-[11px] text-fg-subtle">no store loaded</div>
+      )}
     </div>
   );
 }
