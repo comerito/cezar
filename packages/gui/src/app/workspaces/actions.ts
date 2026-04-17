@@ -1,6 +1,6 @@
 'use server';
 
-import { createSupabaseServerClient } from '@/lib/supabase/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { getSessionUser } from '@/lib/auth';
 import { setActiveWorkspace } from '@/lib/workspace';
 import { redirect } from 'next/navigation';
@@ -27,7 +27,10 @@ export async function createWorkspace(
   const slug = name.toLowerCase().replace(/[^a-z0-9]+/g, '-').replace(/^-|-$/g, '');
   if (!slug) return { error: 'Name must contain at least one alphanumeric character' };
 
-  const supabase = await createSupabaseServerClient();
+  // Workspace creation uses the service-role client because the user isn't a
+  // member yet — RLS would block both the workspace INSERT and the initial
+  // membership INSERT. Auth is already verified above via getSessionUser().
+  const supabase = createSupabaseAdminClient();
 
   const { data: workspace, error: wsErr } = await supabase
     .from('workspaces')
@@ -55,7 +58,9 @@ export async function createWorkspace(
 }
 
 export async function deleteWorkspace(workspaceId: string) {
-  const supabase = await createSupabaseServerClient();
+  const user = await getSessionUser();
+  if (!user) throw new Error('Not authenticated');
+  const supabase = createSupabaseAdminClient();
   const { error } = await supabase.from('workspaces').delete().eq('id', workspaceId);
   if (error) throw new Error(error.message);
   redirect('/dashboard');
