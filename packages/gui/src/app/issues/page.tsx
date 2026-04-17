@@ -1,6 +1,7 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { SupabaseStoreAdapter } from '@/lib/adapters/supabase-store';
 import { getActiveWorkspace } from '@/lib/workspace';
+import { AutofixButton } from './autofix-button';
 import type { StoredIssue } from '@cezar/core';
 
 export default async function IssuesPage() {
@@ -60,6 +61,7 @@ function IssueTable({ issues }: { issues: StoredIssue[] }) {
             <th className="px-4 py-3">Type</th>
             <th className="px-4 py-3">Labels</th>
             <th className="px-4 py-3">Comments</th>
+            <th className="px-4 py-3">Autofix</th>
           </tr>
         </thead>
         <tbody className="divide-y divide-border">
@@ -95,6 +97,15 @@ function IssueTable({ issues }: { issues: StoredIssue[] }) {
                 </div>
               </td>
               <td className="px-4 py-3 text-fg-muted">{issue.commentCount}</td>
+              <td className="px-4 py-3">
+                {issue.analysis.issueType === 'bug' && (issue.analysis.bugConfidence ?? 0) >= 0.7 && issue.analysis.autofixStatus !== 'pr-opened' ? (
+                  <AutofixButton issueNumber={issue.number} />
+                ) : issue.analysis.autofixStatus === 'pr-opened' ? (
+                  <span className="text-[10px] text-accent">PR opened</span>
+                ) : (
+                  <span className="text-[10px] text-fg-subtle">—</span>
+                )}
+              </td>
             </tr>
           ))}
         </tbody>

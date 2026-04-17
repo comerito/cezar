@@ -1,25 +1,35 @@
-export default async function CockpitPage({ params }: { params: Promise<{ flowId: string }> }) {
-  const { flowId } = await params;
-  return (
-    <div className="px-8 py-6">
-      <header className="mb-6 border-b border-border pb-5">
-        <h1 className="text-2xl font-semibold tracking-tight">Cockpit</h1>
-        <p className="mt-1 text-sm text-fg-muted">Flow {flowId}</p>
-      </header>
-      <div className="grid grid-cols-[260px_1fr_260px] gap-4">
-        <Pane title="Stage tracker" body="analyze → fix → commit → review → push → PR" />
-        <Pane title="Agent activity" body="AgentEvent stream wires here in Phase 2." />
-        <Pane title="Budget + artifacts" body="Tokens, model, branch, worktree." />
-      </div>
-    </div>
-  );
+import { createSupabaseAdminClient } from '@/lib/supabase/server';
+import { CockpitShell } from './cockpit-shell';
+import type { Database } from '@/lib/supabase/types';
+
+type FlowRow = Database['public']['Tables']['flows']['Row'];
+type EventRow = Database['public']['Tables']['flow_events']['Row'];
+
+async function loadFlow(flowId: string): Promise<{ flow: FlowRow; events: EventRow[] } | null> {
+  const supabase = createSupabaseAdminClient();
+  const [{ data: flow }, { data: events }] = await Promise.all([
+    supabase.from('flows').select('*').eq('id', flowId).single(),
+    supabase
+      .from('flow_events')
+      .select('*')
+      .eq('flow_id', flowId)
+      .order('created_at', { ascending: true }),
+  ]);
+  if (!flow) return null;
+  return { flow, events: events ?? [] };
 }
 
-function Pane({ title, body }: { title: string; body: string }) {
-  return (
-    <div className="rounded-lg border border-border bg-bg-elevated p-4">
-      <div className="mb-2 text-xs uppercase tracking-wider text-fg-subtle">{title}</div>
-      <div className="text-sm text-fg-muted">{body}</div>
-    </div>
-  );
+export default async function CockpitPage({ params }: { params: Promise<{ flowId: string }> }) {
+  const { flowId } = await params;
+  const data = await loadFlow(flowId);
+
+  if (!data) {
+    return (
+      <div className="flex items-center justify-center py-32 text-fg-muted">
+        Flow not found.
+      </div>
+    );
+  }
+
+  return <CockpitShell flow={data.flow} initialEvents={data.events} />;
 }
