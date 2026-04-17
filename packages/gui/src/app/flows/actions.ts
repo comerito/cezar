@@ -32,7 +32,8 @@ export async function startAutofix(issueNumber: number, mode: 'apply' | 'dry-run
 
   if (error) throw new Error(`Failed to create flow: ${error.message}`);
 
-  runOrchestrator(flow.id, workspace.id, issueNumber, mode, supabase).catch((err) => {
+  const githubToken = user.githubToken || process.env.GITHUB_TOKEN || '';
+  runOrchestrator(flow.id, workspace.id, issueNumber, mode, githubToken, supabase).catch((err) => {
     console.error(`[flow ${flow.id}] orchestrator crashed:`, err);
   });
 
@@ -44,6 +45,7 @@ async function runOrchestrator(
   workspaceId: string,
   issueNumber: number,
   mode: 'apply' | 'dry-run',
+  githubToken: string,
   supabase: ReturnType<typeof createSupabaseAdminClient>,
 ) {
   const eventBridge = new EventBridge(flowId, supabase);
@@ -60,6 +62,7 @@ async function runOrchestrator(
     } catch {
       config = await core.loadConfig({ github: { owner: '', repo: '', token: '' } });
     }
+    if (githubToken) config.github.token = githubToken;
 
     const github = new core.GitHubService(config);
 

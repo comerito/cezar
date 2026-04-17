@@ -34,12 +34,17 @@ export async function runAction(
     const adapter = new SupabaseStoreAdapter(supabase, workspace.id);
     const store = await core.IssueStore.fromPort(adapter);
 
+    const githubToken = user.githubToken || process.env.GITHUB_TOKEN || '';
+
     let config: Config;
     try {
       config = await core.loadConfig();
     } catch {
-      config = await core.loadConfig({ github: { owner: '', repo: '', token: '' } });
+      config = await core.loadConfig({ github: { owner: workspace.repoOwner, repo: workspace.repoName, token: '' } });
     }
+    config.github.owner = workspace.repoOwner;
+    config.github.repo = workspace.repoName;
+    if (githubToken) config.github.token = githubToken;
 
     await runFn(store, config);
     await store.save();

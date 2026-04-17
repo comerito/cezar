@@ -48,6 +48,9 @@ export async function syncAndDigest(_prev: SyncState): Promise<SyncState> {
       });
     }
 
+    const githubToken = user.githubToken || process.env.GITHUB_TOKEN || '';
+    if (!githubToken) return { error: 'No GitHub token — re-login to refresh your OAuth session' };
+
     let config: Awaited<ReturnType<typeof core.loadConfig>>;
     try {
       config = await core.loadConfig();
@@ -56,6 +59,7 @@ export async function syncAndDigest(_prev: SyncState): Promise<SyncState> {
     }
     config.github.owner = workspace.repoOwner;
     config.github.repo = workspace.repoName;
+    config.github.token = githubToken;
 
     const github = new core.GitHubService(config);
     const meta = store.getMeta();
