@@ -65,7 +65,7 @@ function ActionTileCard({ tile, badge }: { tile: ActionTile; badge?: ActionBadge
               <button
                 type="submit"
                 disabled={pending}
-                className="rounded-md bg-accent/80 px-2 py-0.5 text-[10px] font-medium text-bg opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent disabled:opacity-50"
+                className="rounded-md bg-accent px-2.5 py-1 text-[10px] font-medium text-bg hover:bg-accent-hover disabled:opacity-50"
               >
                 {pending ? 'Running...' : 'Run'}
               </button>
