@@ -39,17 +39,15 @@ const EXCLUDED_FROM_RUN = new Set(['autofix', 'contributor-welcome', 'release-no
 
 function ActionTileCard({ tile, badge }: { tile: ActionTile; badge?: ActionBadge }) {
   const [state, formAction, pending] = useActionState<RunActionState, FormData>(runAction, {});
-  const disabled = badge && badge.available !== true;
-  const canRun = !disabled && !EXCLUDED_FROM_RUN.has(tile.id);
+  const unavailable = badge ? (badge.available !== true ? String(badge.available) : null) : null;
+  const showRun = !EXCLUDED_FROM_RUN.has(tile.id);
 
   return (
     <div
       className={cn(
-        'group relative flex flex-col gap-2 rounded-lg border border-border bg-bg-elevated p-4 transition-colors',
-        disabled ? 'opacity-50' : 'hover:border-accent/40',
-        tile.flag === 'headline' && !disabled && 'border-accent/30',
+        'group relative flex flex-col gap-2 rounded-lg border border-border bg-bg-elevated p-4 transition-colors hover:border-accent/40',
+        tile.flag === 'headline' && 'border-accent/30',
       )}
-      title={disabled ? String(badge!.available) : undefined}
     >
       <div className="flex items-center justify-between">
         <span className="text-xl" aria-hidden>{tile.icon}</span>
@@ -59,13 +57,20 @@ function ActionTileCard({ tile, badge }: { tile: ActionTile; badge?: ActionBadge
               {tile.flag}
             </span>
           )}
-          {canRun && (
+          {showRun && (
             <form action={formAction}>
               <input type="hidden" name="actionId" value={tile.id} />
               <button
                 type="submit"
-                disabled={pending}
-                className="rounded-md bg-accent px-2.5 py-1 text-[10px] font-medium text-bg hover:bg-accent-hover disabled:opacity-50"
+                disabled={pending || !!unavailable}
+                title={unavailable ?? undefined}
+                className={cn(
+                  'rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors',
+                  unavailable
+                    ? 'cursor-not-allowed border border-border bg-bg-subtle text-fg-subtle'
+                    : 'bg-accent text-bg hover:bg-accent-hover',
+                  'disabled:opacity-60',
+                )}
               >
                 {pending ? 'Running...' : 'Run'}
               </button>
@@ -78,11 +83,11 @@ function ActionTileCard({ tile, badge }: { tile: ActionTile; badge?: ActionBadge
       {badge ? (
         <div className={cn(
           'mt-1 text-[11px]',
-          badge.badge === 'up to date' || badge.badge === 'nothing to fix'
+          unavailable ? 'text-fg-subtle' : badge.badge === 'up to date' || badge.badge === 'nothing to fix'
             ? 'text-fg-subtle'
             : 'text-accent',
         )}>
-          {badge.badge}
+          {unavailable ? unavailable : badge.badge}
         </div>
       ) : (
         <div className="mt-1 text-[11px] text-fg-subtle">no store loaded</div>
