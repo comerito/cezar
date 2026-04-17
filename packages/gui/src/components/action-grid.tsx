@@ -1,4 +1,8 @@
+'use client';
+
+import { useActionState } from 'react';
 import { ACTION_GROUP_LABELS, ACTION_TILES, type ActionGroup, type ActionTile } from '@/data/actions';
+import { runAction, type RunActionState } from '@/app/dashboard/actions';
 import type { ActionBadge } from '@/lib/badges';
 import { cn } from './ui/cn';
 
@@ -31,8 +35,12 @@ export function ActionGrid({ badges }: ActionGridProps) {
   );
 }
 
+const EXCLUDED_FROM_RUN = new Set(['autofix', 'contributor-welcome', 'release-notes', 'issue-check']);
+
 function ActionTileCard({ tile, badge }: { tile: ActionTile; badge?: ActionBadge }) {
+  const [state, formAction, pending] = useActionState<RunActionState, FormData>(runAction, {});
   const disabled = badge && badge.available !== true;
+  const canRun = !disabled && !EXCLUDED_FROM_RUN.has(tile.id);
 
   return (
     <div
@@ -45,11 +53,25 @@ function ActionTileCard({ tile, badge }: { tile: ActionTile; badge?: ActionBadge
     >
       <div className="flex items-center justify-between">
         <span className="text-xl" aria-hidden>{tile.icon}</span>
-        {tile.flag && (
-          <span className="rounded-full border border-border bg-bg-subtle px-2 py-0.5 text-[10px] uppercase tracking-wider text-fg-muted">
-            {tile.flag}
-          </span>
-        )}
+        <div className="flex items-center gap-1.5">
+          {tile.flag && (
+            <span className="rounded-full border border-border bg-bg-subtle px-2 py-0.5 text-[10px] uppercase tracking-wider text-fg-muted">
+              {tile.flag}
+            </span>
+          )}
+          {canRun && (
+            <form action={formAction}>
+              <input type="hidden" name="actionId" value={tile.id} />
+              <button
+                type="submit"
+                disabled={pending}
+                className="rounded-md bg-accent/80 px-2 py-0.5 text-[10px] font-medium text-bg opacity-0 transition-opacity group-hover:opacity-100 hover:bg-accent disabled:opacity-50"
+              >
+                {pending ? 'Running...' : 'Run'}
+              </button>
+            </form>
+          )}
+        </div>
       </div>
       <div className="text-sm font-medium text-fg">{tile.label}</div>
       <div className="text-xs leading-snug text-fg-muted">{tile.description}</div>
@@ -64,6 +86,12 @@ function ActionTileCard({ tile, badge }: { tile: ActionTile; badge?: ActionBadge
         </div>
       ) : (
         <div className="mt-1 text-[11px] text-fg-subtle">no store loaded</div>
+      )}
+      {state.actionId === tile.id && state.ok && (
+        <div className="text-[10px] text-accent">Done</div>
+      )}
+      {state.actionId === tile.id && state.error && (
+        <div className="text-[10px] text-danger">{state.error}</div>
       )}
     </div>
   );
