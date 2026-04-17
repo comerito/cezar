@@ -1,6 +1,7 @@
 import Link from 'next/link';
 import { signOut } from '@/app/auth/actions';
 import { switchWorkspace } from '@/app/workspace/actions';
+import { NavLink } from './nav-link';
 import type { SessionUser } from '@/lib/auth';
 import type { ActiveWorkspace, WorkspaceListItem } from '@/lib/workspace';
 import { cn } from './ui/cn';
@@ -44,13 +45,7 @@ export function Sidebar({ user, workspace, workspaces }: SidebarProps) {
       {/* Nav */}
       <nav className="flex flex-col gap-0.5">
         {NAV.map((item) => (
-          <Link
-            key={item.href}
-            href={item.href}
-            className="rounded-md px-3 py-2 text-sm text-fg-muted hover:bg-bg-subtle hover:text-fg"
-          >
-            {item.label}
-          </Link>
+          <NavLink key={item.href} href={item.href} label={item.label} />
         ))}
         {workspace?.role === 'admin' && (
           <Link
