@@ -96,7 +96,7 @@ function StatusBadge({ status }: { status: FlowStatus }) {
     'pr-opened': 'bg-accent/20 text-accent',
   };
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ${colors[status] ?? ''}`}>
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase ${colors[status] ?? ''}`}>
       {status}
     </span>
   );

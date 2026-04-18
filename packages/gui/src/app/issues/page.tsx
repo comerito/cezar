@@ -87,12 +87,12 @@ function IssueTable({ issues }: { issues: StoredIssue[] }) {
               <td className="max-w-[180px] px-4 py-3">
                 <div className="flex flex-wrap gap-1">
                   {issue.labels.slice(0, 3).map((l) => (
-                    <span key={l} className="rounded-full bg-bg-subtle px-2 py-0.5 text-[10px] text-fg-muted">
+                    <span key={l} className="rounded-full bg-bg-subtle px-2 py-0.5 text-xs text-fg-muted">
                       {l}
                     </span>
                   ))}
                   {issue.labels.length > 3 && (
-                    <span className="text-[10px] text-fg-subtle">+{issue.labels.length - 3}</span>
+                    <span className="text-xs text-fg-subtle">+{issue.labels.length - 3}</span>
                   )}
                 </div>
               </td>
@@ -101,9 +101,9 @@ function IssueTable({ issues }: { issues: StoredIssue[] }) {
                 {issue.analysis.issueType === 'bug' && (issue.analysis.bugConfidence ?? 0) >= 0.7 && issue.analysis.autofixStatus !== 'pr-opened' ? (
                   <AutofixButton issueNumber={issue.number} />
                 ) : issue.analysis.autofixStatus === 'pr-opened' ? (
-                  <span className="text-[10px] text-accent">PR opened</span>
+                  <span className="text-xs text-accent">PR opened</span>
                 ) : (
-                  <span className="text-[10px] text-fg-subtle">—</span>
+                  <span className="text-xs text-fg-subtle">—</span>
                 )}
               </td>
             </tr>
@@ -124,7 +124,7 @@ const PRIORITY_COLORS: Record<string, string> = {
 function PriorityChip({ priority }: { priority: string | null | undefined }) {
   if (!priority) return <span className="text-fg-subtle">—</span>;
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ${PRIORITY_COLORS[priority] ?? ''}`}>
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase ${PRIORITY_COLORS[priority] ?? ''}`}>
       {priority}
     </span>
   );
@@ -137,7 +137,7 @@ function TypeChip({ type, confidence }: { type: string | null | undefined; confi
   return (
     <span className="inline-flex items-center gap-1 text-xs text-fg-muted">
       {TYPE_ICONS[type] ?? ''} {type}
-      {confidence != null && <span className="text-[10px] text-fg-subtle">({Math.round(confidence * 100)}%)</span>}
+      {confidence != null && <span className="text-xs text-fg-subtle">({Math.round(confidence * 100)}%)</span>}
     </span>
   );
 }

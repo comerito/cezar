@@ -61,7 +61,7 @@ export function RunDrawer({ runId, actionLabel, onClose }: RunDrawerProps) {
             <div className="mt-0.5 flex items-center gap-2">
               <StatusIndicator status={status} />
               {lastProgress?.total && lastProgress.current != null && (
-                <span className="text-[10px] text-fg-subtle">
+                <span className="text-xs text-fg-subtle">
                   {lastProgress.current}/{lastProgress.total}
                 </span>
               )}
@@ -96,7 +96,7 @@ export function RunDrawer({ runId, actionLabel, onClose }: RunDrawerProps) {
           )}
           {logs.map((log, i) => (
             <div key={i} className="flex gap-3 py-1">
-              <span className="w-10 shrink-0 text-right font-mono text-[10px] text-fg-subtle">
+              <span className="w-10 shrink-0 text-right font-mono text-xs text-fg-subtle">
                 {formatElapsed(logs[0]?.ts, log.ts)}
               </span>
               <div className={cn(
@@ -127,7 +127,7 @@ export function RunDrawer({ runId, actionLabel, onClose }: RunDrawerProps) {
 
 function StatusIndicator({ status }: { status: 'running' | 'done' | 'error' }) {
   return (
-    <span className="flex items-center gap-1.5 text-[10px]">
+    <span className="flex items-center gap-1.5 text-xs">
       <span className={cn(
         'inline-block h-1.5 w-1.5 rounded-full',
         status === 'running' && 'animate-pulse bg-accent',

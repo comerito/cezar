@@ -91,7 +91,7 @@ function ActionTileCard({
         <span className="text-xl" aria-hidden>{tile.icon}</span>
         <div className="flex items-center gap-1.5">
           {tile.flag && (
-            <span className="rounded-full border border-border bg-bg-subtle px-2 py-0.5 text-[10px] uppercase tracking-wider text-fg-muted">
+            <span className="rounded-full border border-border bg-bg-subtle px-2 py-0.5 text-xs uppercase tracking-wider text-fg-muted">
               {tile.flag}
             </span>
           )}
@@ -101,7 +101,7 @@ function ActionTileCard({
               disabled={!!unavailable}
               title={unavailable ?? undefined}
               className={cn(
-                'rounded-md px-2.5 py-1 text-[10px] font-medium transition-colors',
+                'rounded-md px-2.5 py-1 text-xs font-medium transition-colors',
                 unavailable
                   ? 'cursor-not-allowed border border-border bg-bg-subtle text-fg-subtle'
                   : 'bg-accent text-bg hover:bg-accent-hover',
@@ -113,7 +113,7 @@ function ActionTileCard({
           {isRunning && (
             <button
               onClick={onViewLogs}
-              className="flex items-center gap-1 rounded-md bg-accent/20 px-2.5 py-1 text-[10px] font-medium text-accent"
+              className="flex items-center gap-1 rounded-md bg-accent/20 px-2.5 py-1 text-xs font-medium text-accent"
             >
               <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
               Running...
@@ -125,7 +125,7 @@ function ActionTileCard({
       <div className="text-xs leading-snug text-fg-muted">{tile.description}</div>
       {badge ? (
         <div className={cn(
-          'mt-1 text-[11px]',
+          'mt-1 text-xs',
           unavailable ? 'text-fg-subtle' : badge.badge === 'up to date' || badge.badge === 'nothing to fix'
             ? 'text-fg-subtle'
             : 'text-accent',
@@ -133,7 +133,7 @@ function ActionTileCard({
           {unavailable ? unavailable : badge.badge}
         </div>
       ) : (
-        <div className="mt-1 text-[11px] text-fg-subtle">no store loaded</div>
+        <div className="mt-1 text-xs text-fg-subtle">no store loaded</div>
       )}
     </div>
   );

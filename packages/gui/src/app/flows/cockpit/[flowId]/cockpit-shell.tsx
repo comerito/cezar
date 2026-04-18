@@ -206,7 +206,7 @@ function StatusBadge({ status }: { status: FlowStatus }) {
     'pr-opened': 'bg-accent/20 text-accent',
   };
   return (
-    <span className={`rounded-full px-2 py-0.5 text-[10px] font-medium uppercase ${colors[status] ?? ''}`}>
+    <span className={`rounded-full px-2 py-0.5 text-xs font-medium uppercase ${colors[status] ?? ''}`}>
       {status}
     </span>
   );
@@ -256,14 +256,14 @@ function EventLine({ event }: { event: EventRow }) {
   if (agentType === 'tool-result') {
     const preview = typeof payload.result === 'string' ? payload.result.slice(0, 120) : '';
     return (
-      <div className={cn('py-0.5 pl-3 text-[11px]', payload.isError ? 'text-danger' : 'text-fg-subtle')}>
+      <div className={cn('py-0.5 pl-3 text-xs', payload.isError ? 'text-danger' : 'text-fg-subtle')}>
         ◂ {preview}{payload.result?.length > 120 ? '...' : ''}
       </div>
     );
   }
   if (agentType === 'turn-end') {
     return (
-      <div className="py-0.5 pl-3 text-[10px] text-fg-subtle">
+      <div className="py-0.5 pl-3 text-xs text-fg-subtle">
         — turn end ({payload.tokensUsed?.toLocaleString()} tokens)
       </div>
     );

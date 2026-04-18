@@ -117,7 +117,7 @@ export default async function ActivityPage() {
         <div className="space-y-0">
           {items.map((item, idx) => (
             <div key={item.id} className="flex gap-4 border-l-2 border-border py-2 pl-4">
-              <div className="w-16 shrink-0 text-right text-[10px] text-fg-subtle">
+              <div className="w-16 shrink-0 text-right text-xs text-fg-subtle">
                 {formatTime(item.timestamp)}
               </div>
               <div className="flex-1">
@@ -128,7 +128,7 @@ export default async function ActivityPage() {
                 {item.flowId && (
                   <a
                     href={`/flows/cockpit/${item.flowId}`}
-                    className="mt-0.5 inline-block text-[10px] text-fg-subtle hover:text-accent"
+                    className="mt-0.5 inline-block text-xs text-fg-subtle hover:text-accent"
                   >
                     view cockpit
                   </a>

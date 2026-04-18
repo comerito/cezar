@@ -21,14 +21,14 @@ export function AutofixButton({ issueNumber }: { issueNumber: number }) {
       <button
         onClick={handleClick}
         disabled={loading}
-        className="rounded-md bg-accent px-2 py-0.5 text-[10px] font-medium text-bg hover:bg-accent-hover disabled:opacity-50"
+        className="rounded-md bg-accent px-2 py-0.5 text-xs font-medium text-bg hover:bg-accent-hover disabled:opacity-50"
       >
         {loading ? '...' : 'Fix'}
       </button>
       <select
         value={mode}
         onChange={(e) => setMode(e.target.value as 'apply' | 'dry-run')}
-        className="rounded border border-border bg-bg px-1 py-0.5 text-[10px] text-fg-muted"
+        className="rounded border border-border bg-bg px-1 py-0.5 text-xs text-fg-muted"
       >
         <option value="dry-run">dry-run</option>
         <option value="apply">apply</option>

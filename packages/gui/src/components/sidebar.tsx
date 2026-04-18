@@ -23,7 +23,7 @@ interface SidebarProps {
 
 export function Sidebar({ user, workspace, workspaces }: SidebarProps) {
   return (
-    <aside className="flex h-screen w-56 flex-col border-r border-border bg-bg-elevated px-3 py-5">
+    <aside className="sticky top-0 flex h-screen w-56 shrink-0 flex-col overflow-y-auto border-r border-border bg-bg-elevated px-3 py-5">
       {/* Brand */}
       <div className="px-3 pb-4">
         <div className="text-lg font-semibold tracking-tight">CEZAR</div>
@@ -72,7 +72,7 @@ export function Sidebar({ user, workspace, workspaces }: SidebarProps) {
           <div className="min-w-0 flex-1">
             <div className="truncate text-xs font-medium text-fg">{user.name}</div>
             {workspace && (
-              <div className="truncate text-[10px] text-fg-subtle">{workspace.role}</div>
+              <div className="truncate text-xs text-fg-subtle">{workspace.role}</div>
             )}
           </div>
         </div>
@@ -100,7 +100,7 @@ function WorkspaceSwitcher({
     return (
       <div className="rounded-md border border-border bg-bg-subtle px-3 py-2">
         <div className="truncate text-xs font-medium text-fg">{current.name}</div>
-        <div className="truncate text-[10px] text-fg-subtle">
+        <div className="truncate text-xs text-fg-subtle">
           {current.repoOwner}/{current.repoName}
         </div>
       </div>
@@ -121,7 +121,7 @@ function WorkspaceSwitcher({
             )}
           >
             <div className="truncate text-xs font-medium text-fg">{ws.name}</div>
-            <div className="truncate text-[10px] text-fg-subtle">
+            <div className="truncate text-xs text-fg-subtle">
               {ws.repoOwner}/{ws.repoName}
             </div>
           </button>

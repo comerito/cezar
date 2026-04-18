@@ -40,7 +40,7 @@ export function TeamSection({ members, isAdmin, currentUserId }: TeamSectionProp
                     {m.avatarUrl && <img src={m.avatarUrl} alt="" className="h-6 w-6 rounded-full" />}
                     <div>
                       <div className="text-xs font-medium text-fg">{m.name}</div>
-                      <div className="text-[10px] text-fg-subtle">{m.email}</div>
+                      <div className="text-xs text-fg-subtle">{m.email}</div>
                     </div>
                   </div>
                 </td>
