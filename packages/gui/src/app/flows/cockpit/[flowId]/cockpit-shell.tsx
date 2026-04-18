@@ -137,19 +137,26 @@ export function CockpitShell({ flow, initialEvents, tokenBudgetLimit }: CockpitS
             {STAGES.map((stage) => {
               const idx = STAGES.indexOf(stage);
               const currentIdx = STAGES.indexOf(currentStage as any);
-              const done = idx < currentIdx || isTerminal;
+              const isFailed = isTerminal && flowStatus === 'failed';
+              const isSkipped = isTerminal && flowStatus === 'skipped';
+              const failedAtCurrent = (isFailed || isSkipped) && idx === currentIdx;
+              const done = idx < currentIdx || (isTerminal && !isFailed && !isSkipped);
+              const passedBeforeFailure = (isFailed || isSkipped) && idx < currentIdx;
               const active = idx === currentIdx && !isTerminal;
+              const unreached = isTerminal && idx > currentIdx;
               return (
                 <div
                   key={stage}
                   className={cn(
                     'rounded-md px-3 py-1.5 text-xs',
-                    done && 'text-accent',
+                    (done || passedBeforeFailure) && 'text-accent',
+                    failedAtCurrent && 'font-medium text-danger',
                     active && 'bg-bg-subtle font-medium text-fg',
-                    !done && !active && 'text-fg-subtle',
+                    unreached && 'text-fg-subtle',
+                    !done && !passedBeforeFailure && !failedAtCurrent && !active && !unreached && 'text-fg-subtle',
                   )}
                 >
-                  {done ? '✓' : active ? '▸' : '·'} {stage}
+                  {failedAtCurrent ? '✗' : (done || passedBeforeFailure) ? '✓' : active ? '▸' : '·'} {stage}
                 </div>
               );
             })}
