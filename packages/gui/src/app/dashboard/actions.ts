@@ -7,53 +7,71 @@ import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { SupabaseStoreAdapter } from '@/lib/adapters/supabase-store';
 import type { IssueStore, Config } from '@cezar/core';
 
-export interface RunActionState {
-  ok?: boolean;
-  error?: string;
-  actionId?: string;
+export async function startAction(actionId: string): Promise<{ ok: boolean; runId?: string; error?: string }> {
+  const user = await getSessionUser();
+  if (!user) return { ok: false, error: 'Not authenticated' };
+  const workspace = await getActiveWorkspace();
+  if (!workspace) return { ok: false, error: 'No workspace selected' };
+
+  const runId = `action-${actionId}-${Date.now()}`;
+
+  runActionInBackground(runId, actionId, workspace.id, workspace.repoOwner, workspace.repoName, user.githubToken).catch((err) => {
+    console.error(`[action ${runId}] crashed:`, err);
+  });
+
+  return { ok: true, runId };
 }
 
-export async function runAction(
-  _prev: RunActionState,
-  formData: FormData,
-): Promise<RunActionState> {
-  const actionId = formData.get('actionId') as string;
-  if (!actionId) return { error: 'Missing actionId' };
+async function runActionInBackground(
+  runId: string,
+  actionId: string,
+  workspaceId: string,
+  repoOwner: string,
+  repoName: string,
+  githubToken: string | null,
+) {
+  const supabase = createSupabaseAdminClient();
+  const channel = supabase.channel(runId);
+  await channel.subscribe();
 
-  const user = await getSessionUser();
-  if (!user) return { error: 'Not authenticated' };
-  const workspace = await getActiveWorkspace();
-  if (!workspace) return { error: 'No workspace selected' };
-
-  const runFn = ACTION_RUNNERS[actionId];
-  if (!runFn) return { error: `Action "${actionId}" not yet wired in GUI`, actionId };
+  function emit(stage: string, message: string, current?: number, total?: number) {
+    channel.send({ type: 'broadcast', event: 'progress', payload: { stage, message, current, total, actionId } });
+  }
 
   try {
+    emit('init', `Starting ${actionId}...`);
     const core = await import('@cezar/core');
-    const supabase = createSupabaseAdminClient();
-    const adapter = new SupabaseStoreAdapter(supabase, workspace.id);
+    const adapter = new SupabaseStoreAdapter(supabase, workspaceId);
     const store = await core.IssueStore.fromPort(adapter);
 
-    const githubToken = user.githubToken || process.env.GITHUB_TOKEN || '';
-
+    const token = githubToken || process.env.GITHUB_TOKEN || '';
     let config: Config;
     try {
       config = await core.loadConfig();
     } catch {
-      config = await core.loadConfig({ github: { owner: workspace.repoOwner, repo: workspace.repoName, token: '' } });
+      config = await core.loadConfig({ github: { owner: repoOwner, repo: repoName, token: '' } });
     }
-    config.github.owner = workspace.repoOwner;
-    config.github.repo = workspace.repoName;
-    if (githubToken) config.github.token = githubToken;
+    config.github.owner = repoOwner;
+    config.github.repo = repoName;
+    if (token) config.github.token = token;
 
+    const runFn = ACTION_RUNNERS[actionId];
+    if (!runFn) {
+      emit('error', `Action "${actionId}" not wired in GUI`);
+      return;
+    }
+
+    emit('running', `Running ${actionId}...`);
     await runFn(store, config);
     await store.save();
 
+    emit('done', `${actionId} completed`);
     revalidatePath('/dashboard');
     revalidatePath('/issues');
-    return { ok: true, actionId };
   } catch (err) {
-    return { error: (err as Error).message, actionId };
+    emit('error', (err as Error).message);
+  } finally {
+    setTimeout(() => supabase.removeChannel(channel), 5000);
   }
 }
 
