@@ -57,83 +57,42 @@ export function CockpitShell({ flow, initialEvents, tokenBudgetLimit }: CockpitS
 
   const isTerminal = ['succeeded', 'failed', 'skipped', 'pr-opened'].includes(flowStatus);
 
-  // Realtime subscription for new events
+  // Broadcast subscription for live events (no RLS issues)
   useEffect(() => {
+    if (isTerminal) return;
     const supabase = createSupabaseBrowserClient();
 
     const channel = supabase
-      .channel(`flow-events-${flow.id}`)
-      .on(
-        'postgres_changes' as any,
-        {
-          event: 'INSERT',
-          schema: 'public',
-          table: 'flow_events',
-          filter: `flow_id=eq.${flow.id}`,
-        },
-        (payload: any) => {
-          const newEvent = payload.new as EventRow;
-          if (!seenEventIds.current.has(newEvent.id)) {
-            seenEventIds.current.add(newEvent.id);
-            setEvents((prev) => [...prev, newEvent]);
-          }
-        },
-      )
-      .on(
-        'postgres_changes' as any,
-        {
-          event: 'UPDATE',
-          schema: 'public',
-          table: 'flows',
-          filter: `id=eq.${flow.id}`,
-        },
-        (payload: any) => {
-          const updated = payload.new as FlowRow;
-          setFlowStatus(updated.status);
-          setFlowOutcome(updated.outcome);
-        },
-      )
+      .channel(`flow-live-${flow.id}`)
+      .on('broadcast', { event: 'flow_event' }, (msg) => {
+        const evt = msg.payload as EventRow;
+        if (evt && !seenEventIds.current.has(evt.id)) {
+          seenEventIds.current.add(evt.id);
+          setEvents((prev) => [...prev, evt]);
+        }
+      })
       .subscribe();
 
     return () => { supabase.removeChannel(channel); };
-  }, [flow.id]);
+  }, [flow.id, isTerminal]);
 
-  // Polling fallback: fetch new events + flow status every 3s while running
+  // Polling fallback for flow status (every 5s, lightweight)
   useEffect(() => {
     if (isTerminal) return;
 
     const supabase = createSupabaseBrowserClient();
     const interval = setInterval(async () => {
-      const [{ data: newEvents }, { data: updatedFlow }] = await Promise.all([
-        supabase
-          .from('flow_events')
-          .select('*')
-          .eq('flow_id', flow.id)
-          .order('created_at', { ascending: true }),
-        supabase
-          .from('flows')
-          .select('status, outcome')
-          .eq('id', flow.id)
-          .single(),
-      ]);
-
-      if (newEvents) {
-        const unseen = newEvents.filter((e: EventRow) => !seenEventIds.current.has(e.id));
-        if (unseen.length > 0) {
-          for (const e of unseen) seenEventIds.current.add(e.id);
-          setEvents((prev) => {
-            const allIds = new Set(prev.map((p) => p.id));
-            const toAdd = unseen.filter((e: EventRow) => !allIds.has(e.id));
-            return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
-          });
-        }
-      }
+      const { data: updatedFlow } = await supabase
+        .from('flows')
+        .select('status, outcome')
+        .eq('id', flow.id)
+        .single();
 
       if (updatedFlow) {
         setFlowStatus(updatedFlow.status as FlowStatus);
         setFlowOutcome(updatedFlow.outcome);
       }
-    }, 3000);
+    }, 5000);
 
     return () => clearInterval(interval);
   }, [flow.id, isTerminal]);
@@ -240,8 +199,9 @@ export function CockpitShell({ flow, initialEvents, tokenBudgetLimit }: CockpitS
           </div>
 
           {!isTerminal && (
-            <div className="mt-6 text-xs text-fg-subtle animate-pulse">
-              Live — polling every 3s
+            <div className="mt-6 flex items-center gap-1.5 text-xs text-fg-subtle">
+              <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+              Live
             </div>
           )}
         </div>

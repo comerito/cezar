@@ -111,6 +111,8 @@ async function runOrchestrator(
       .from('flows')
       .update({ status: 'failed', outcome: { status: 'failed', reason: message } as any })
       .eq('id', flowId);
+  } finally {
+    setTimeout(() => eventBridge.dispose(), 3000);
   }
 }
 

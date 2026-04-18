@@ -3,29 +3,55 @@ import type { EventPort, AgentEvent } from '@cezar/core';
 import type { Database } from '../supabase/types';
 
 /**
- * Persists orchestrator events to the flow_events table. The cockpit
- * subscribes to Supabase Realtime on this table (RLS-scoped to the
- * flow's actor or admin).
+ * Persists orchestrator events to the flow_events table AND broadcasts
+ * them over a Supabase Realtime channel for instant client updates.
+ *
+ * Why both: postgres_changes subscriptions fail when the admin client
+ * writes (bypasses RLS) but the browser client subscribes (RLS blocks
+ * the notification). Broadcast channels skip RLS entirely.
  */
 export class EventBridge implements EventPort {
+  private channel: ReturnType<SupabaseClient['channel']>;
+  private channelReady: Promise<void>;
+
   constructor(
     private readonly flowId: string,
     private readonly supabase: SupabaseClient<Database>,
-  ) {}
+  ) {
+    this.channel = supabase.channel(`flow-live-${flowId}`);
+    this.channelReady = new Promise((resolve) => {
+      this.channel.subscribe((status) => {
+        if (status === 'SUBSCRIBED') resolve();
+      });
+    });
+  }
 
   lifecycle(message: string): void {
-    this.persist('lifecycle', { message });
+    this.emit('lifecycle', { message });
   }
 
   agent(event: AgentEvent): void {
-    this.persist('agent', event);
+    this.emit('agent', event);
   }
 
   progress(phase: number, current: number, total: number): void {
-    this.persist('lifecycle', { message: `Phase ${phase}: ${current}/${total}` });
+    this.emit('lifecycle', { message: `Phase ${phase}: ${current}/${total}` });
   }
 
-  private persist(type: 'lifecycle' | 'agent', payload: unknown): void {
+  async dispose(): Promise<void> {
+    await this.supabase.removeChannel(this.channel);
+  }
+
+  private emit(type: 'lifecycle' | 'agent', payload: unknown): void {
+    const eventData = {
+      id: crypto.randomUUID(),
+      flow_id: this.flowId,
+      type,
+      payload,
+      created_at: new Date().toISOString(),
+    };
+
+    // Persist to DB for history
     this.supabase
       .from('flow_events')
       .insert({
@@ -36,5 +62,14 @@ export class EventBridge implements EventPort {
       .then(({ error }) => {
         if (error) console.error('[EventBridge] persist failed:', error.message);
       });
+
+    // Broadcast for instant client delivery
+    this.channelReady.then(() => {
+      this.channel.send({
+        type: 'broadcast',
+        event: 'flow_event',
+        payload: eventData,
+      });
+    });
   }
 }
