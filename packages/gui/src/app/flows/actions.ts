@@ -9,6 +9,7 @@ import { SupabaseStoreAdapter } from '@/lib/adapters/supabase-store';
 import { loadWorkspaceConfig } from '@/lib/load-workspace-config';
 import { EventBridge } from '@/lib/adapters/event-bridge';
 import { WebConfirmAdapter, resolvePendingConfirmation, cancelPendingConfirmation } from '@/lib/adapters/web-confirm';
+import { ensureRepoClone } from '@/lib/repo-clone';
 
 export async function startAutofix(issueNumber: number, mode: 'apply' | 'dry-run') {
   const user = await getSessionUser();
@@ -58,6 +59,18 @@ async function runOrchestrator(
     const store = await core.IssueStore.fromPort(adapter);
 
     const config = await loadWorkspaceConfig(workspaceId, supabase, { githubToken });
+
+    if (!config.autofix.repoRoot) {
+      eventBridge.lifecycle('Cloning repository...');
+      const repoRoot = await ensureRepoClone(
+        config.github.owner,
+        config.github.repo,
+        config.github.token,
+        config.autofix.baseBranch,
+      );
+      config.autofix.repoRoot = repoRoot;
+      eventBridge.lifecycle(`Repository cloned to ${repoRoot}`);
+    }
 
     const github = new core.GitHubService(config);
 
