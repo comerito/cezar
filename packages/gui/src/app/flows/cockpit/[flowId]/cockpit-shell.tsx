@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useRef, useState, useCallback } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { confirmFlowRootCause, cancelFlow } from '@/app/flows/actions';
 import type { Database, FlowStatus, Json } from '@/lib/supabase/types';
@@ -12,6 +12,7 @@ type EventRow = Database['public']['Tables']['flow_events']['Row'];
 interface CockpitShellProps {
   flow: FlowRow;
   initialEvents: EventRow[];
+  tokenBudgetLimit: number;
 }
 
 const STAGES = ['worktree', 'analyze', 'approval', 'fix', 'commit', 'review', 'push', 'pr'] as const;
@@ -28,31 +29,35 @@ function deriveStage(events: EventRow[]): string {
   if (last.includes('fix')) return 'fix';
   if (last.includes('approval') || last.includes('root-cause')) return 'approval';
   if (last.includes('analy')) return 'analyze';
-  if (last.includes('worktree') || last.includes('preparing')) return 'worktree';
+  if (last.includes('worktree') || last.includes('preparing') || last.includes('clon')) return 'worktree';
   return 'worktree';
 }
 
-function deriveBudget(events: EventRow[]): { used: number; limit: number } {
+function deriveTokensUsed(events: EventRow[]): number {
   let used = 0;
-  let limit = 250_000;
   for (const e of events) {
     if (e.type !== 'agent') continue;
     const p = e.payload as any;
-    if (p?.type === 'turn-end' && typeof p.tokensUsed === 'number') used += p.tokensUsed;
-    if (p?.type === 'budget-exceeded') {
-      used = p.used;
-      limit = p.limit;
+    if (p?.type === 'turn-end' && typeof p.tokensUsed === 'number') {
+      used += p.tokensUsed;
+    }
+    if (p?.type === 'budget-exceeded' && typeof p.used === 'number') {
+      return p.used;
     }
   }
-  return { used, limit };
+  return used;
 }
 
-export function CockpitShell({ flow, initialEvents }: CockpitShellProps) {
+export function CockpitShell({ flow, initialEvents, tokenBudgetLimit }: CockpitShellProps) {
   const [events, setEvents] = useState<EventRow[]>(initialEvents);
   const [flowStatus, setFlowStatus] = useState<FlowStatus>(flow.status);
   const [flowOutcome, setFlowOutcome] = useState<Json | null>(flow.outcome);
   const feedRef = useRef<HTMLDivElement>(null);
+  const seenEventIds = useRef(new Set(initialEvents.map((e) => e.id)));
 
+  const isTerminal = ['succeeded', 'failed', 'skipped', 'pr-opened'].includes(flowStatus);
+
+  // Realtime subscription for new events
   useEffect(() => {
     const supabase = createSupabaseBrowserClient();
 
@@ -67,7 +72,11 @@ export function CockpitShell({ flow, initialEvents }: CockpitShellProps) {
           filter: `flow_id=eq.${flow.id}`,
         },
         (payload: any) => {
-          setEvents((prev) => [...prev, payload.new as EventRow]);
+          const newEvent = payload.new as EventRow;
+          if (!seenEventIds.current.has(newEvent.id)) {
+            seenEventIds.current.add(newEvent.id);
+            setEvents((prev) => [...prev, newEvent]);
+          }
         },
       )
       .on(
@@ -89,13 +98,52 @@ export function CockpitShell({ flow, initialEvents }: CockpitShellProps) {
     return () => { supabase.removeChannel(channel); };
   }, [flow.id]);
 
+  // Polling fallback: fetch new events + flow status every 3s while running
+  useEffect(() => {
+    if (isTerminal) return;
+
+    const supabase = createSupabaseBrowserClient();
+    const interval = setInterval(async () => {
+      const [{ data: newEvents }, { data: updatedFlow }] = await Promise.all([
+        supabase
+          .from('flow_events')
+          .select('*')
+          .eq('flow_id', flow.id)
+          .order('created_at', { ascending: true }),
+        supabase
+          .from('flows')
+          .select('status, outcome')
+          .eq('id', flow.id)
+          .single(),
+      ]);
+
+      if (newEvents) {
+        const unseen = newEvents.filter((e: EventRow) => !seenEventIds.current.has(e.id));
+        if (unseen.length > 0) {
+          for (const e of unseen) seenEventIds.current.add(e.id);
+          setEvents((prev) => {
+            const allIds = new Set(prev.map((p) => p.id));
+            const toAdd = unseen.filter((e: EventRow) => !allIds.has(e.id));
+            return toAdd.length > 0 ? [...prev, ...toAdd] : prev;
+          });
+        }
+      }
+
+      if (updatedFlow) {
+        setFlowStatus(updatedFlow.status as FlowStatus);
+        setFlowOutcome(updatedFlow.outcome);
+      }
+    }, 3000);
+
+    return () => clearInterval(interval);
+  }, [flow.id, isTerminal]);
+
   useEffect(() => {
     feedRef.current?.scrollTo({ top: feedRef.current.scrollHeight, behavior: 'smooth' });
   }, [events.length]);
 
   const currentStage = deriveStage(events);
-  const budget = deriveBudget(events);
-  const isTerminal = ['succeeded', 'failed', 'skipped', 'pr-opened'].includes(flowStatus);
+  const tokensUsed = deriveTokensUsed(events);
   const pendingConfirmation = !isTerminal && (flowOutcome as any)?.pendingConfirmation;
 
   return (
@@ -173,9 +221,9 @@ export function CockpitShell({ flow, initialEvents }: CockpitShellProps) {
         {/* Right: Budget + info */}
         <div className="border-l border-border bg-bg-elevated p-4">
           <div className="mb-3 text-xs font-medium uppercase tracking-wider text-fg-subtle">Budget</div>
-          <BudgetBar used={budget.used} limit={budget.limit} />
+          <BudgetBar used={tokensUsed} limit={tokenBudgetLimit} />
           <div className="mt-2 text-xs text-fg-muted">
-            {budget.used.toLocaleString()} / {budget.limit.toLocaleString()} tokens
+            {tokensUsed.toLocaleString()} / {tokenBudgetLimit.toLocaleString()} tokens
           </div>
 
           <div className="mt-6 text-xs font-medium uppercase tracking-wider text-fg-subtle">Info</div>
@@ -190,6 +238,12 @@ export function CockpitShell({ flow, initialEvents }: CockpitShellProps) {
               </a>
             )}
           </div>
+
+          {!isTerminal && (
+            <div className="mt-6 text-xs text-fg-subtle animate-pulse">
+              Live — polling every 3s
+            </div>
+          )}
         </div>
       </div>
     </div>
