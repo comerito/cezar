@@ -5,6 +5,7 @@ import { getSessionUser } from '@/lib/auth';
 import { getActiveWorkspace } from '@/lib/workspace';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { SupabaseStoreAdapter } from '@/lib/adapters/supabase-store';
+import { loadWorkspaceConfig } from '@/lib/load-workspace-config';
 import type { IssueStore, Config } from '@cezar/core';
 
 export async function startAction(actionId: string): Promise<{ ok: boolean; runId?: string; error?: string }> {
@@ -44,16 +45,11 @@ async function runActionInBackground(
     const adapter = new SupabaseStoreAdapter(supabase, workspaceId);
     const store = await core.IssueStore.fromPort(adapter);
 
-    const token = githubToken || process.env.GITHUB_TOKEN || '';
-    let config: Config;
-    try {
-      config = await core.loadConfig();
-    } catch {
-      config = await core.loadConfig({ github: { owner: repoOwner, repo: repoName, token: '' } });
-    }
-    config.github.owner = repoOwner;
-    config.github.repo = repoName;
-    if (token) config.github.token = token;
+    const config = await loadWorkspaceConfig(workspaceId, supabase, {
+      githubToken: githubToken || undefined,
+      repoOwner,
+      repoName,
+    });
 
     const runFn = ACTION_RUNNERS[actionId];
     if (!runFn) {

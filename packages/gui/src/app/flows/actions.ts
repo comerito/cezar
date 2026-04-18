@@ -6,6 +6,7 @@ import { getSessionUser } from '@/lib/auth';
 import { getActiveWorkspace } from '@/lib/workspace';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { SupabaseStoreAdapter } from '@/lib/adapters/supabase-store';
+import { loadWorkspaceConfig } from '@/lib/load-workspace-config';
 import { EventBridge } from '@/lib/adapters/event-bridge';
 import { WebConfirmAdapter, resolvePendingConfirmation, cancelPendingConfirmation } from '@/lib/adapters/web-confirm';
 
@@ -56,13 +57,7 @@ async function runOrchestrator(
     const adapter = new SupabaseStoreAdapter(supabase, workspaceId);
     const store = await core.IssueStore.fromPort(adapter);
 
-    let config: Awaited<ReturnType<typeof core.loadConfig>>;
-    try {
-      config = await core.loadConfig();
-    } catch {
-      config = await core.loadConfig({ github: { owner: '', repo: '', token: '' } });
-    }
-    if (githubToken) config.github.token = githubToken;
+    const config = await loadWorkspaceConfig(workspaceId, supabase, { githubToken });
 
     const github = new core.GitHubService(config);
 

@@ -1,5 +1,6 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { SupabaseStoreAdapter } from '@/lib/adapters/supabase-store';
+import { loadWorkspaceConfig } from '@/lib/load-workspace-config';
 import { computeBadges, type ActionBadge } from '@/lib/badges';
 
 export async function loadWorkspaceBadges(
@@ -10,15 +11,9 @@ export async function loadWorkspaceBadges(
     const supabase = await createSupabaseServerClient();
     const adapter = new SupabaseStoreAdapter(supabase, workspaceId);
     const store = await core.IssueStore.fromPort(adapter);
+    const config = await loadWorkspaceConfig(workspaceId, supabase);
 
-    let config: typeof core extends { Config: infer C } ? C : unknown;
-    try {
-      config = await core.loadConfig();
-    } catch {
-      config = await core.loadConfig({ github: { owner: '', repo: '', token: '' } });
-    }
-
-    return computeBadges(store, config as any);
+    return computeBadges(store, config);
   } catch (err) {
     console.error('[load-badges] Failed:', (err as Error).message);
     return undefined;

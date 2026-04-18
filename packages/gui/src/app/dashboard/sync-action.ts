@@ -5,6 +5,7 @@ import { getSessionUser } from '@/lib/auth';
 import { getActiveWorkspace } from '@/lib/workspace';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { SupabaseStoreAdapter } from '@/lib/adapters/supabase-store';
+import { loadWorkspaceConfig } from '@/lib/load-workspace-config';
 
 export async function startSync(): Promise<{ ok: boolean; error?: string; syncId?: string }> {
   const user = await getSessionUser();
@@ -59,15 +60,11 @@ async function runSyncInBackground(
       });
     }
 
-    let config: Awaited<ReturnType<typeof core.loadConfig>>;
-    try {
-      config = await core.loadConfig();
-    } catch {
-      config = await core.loadConfig({ github: { owner: repoOwner, repo: repoName, token: '' } });
-    }
-    config.github.owner = repoOwner;
-    config.github.repo = repoName;
-    config.github.token = githubToken;
+    const config = await loadWorkspaceConfig(workspaceId, supabase, {
+      githubToken,
+      repoOwner,
+      repoName,
+    });
 
     // Fetch issues
     emit('fetch', 'Fetching issues from GitHub...');
