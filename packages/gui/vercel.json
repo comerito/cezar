@@ -11,6 +11,10 @@
     {
       "path": "/api/cron/ci-fix",
       "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/issue-sync",
+      "schedule": "*/5 * * * *"
     }
   ]
 }

@@ -3,12 +3,15 @@
 import { useActionState } from 'react';
 import { saveWorkspaceConfig, type SaveConfigState } from './actions';
 
+export type IssueAutofixMode = 'off' | 'notify' | 'autonomous';
+
 interface SettingsFormProps {
   config: Record<string, unknown>;
+  issueAutofixMode: IssueAutofixMode;
   readOnly: boolean;
 }
 
-export function SettingsForm({ config, readOnly }: SettingsFormProps) {
+export function SettingsForm({ config, issueAutofixMode, readOnly }: SettingsFormProps) {
   const [state, formAction, pending] = useActionState<SaveConfigState, FormData>(
     saveWorkspaceConfig,
     {},
@@ -31,6 +34,21 @@ export function SettingsForm({ config, readOnly }: SettingsFormProps) {
           {state.error}
         </div>
       )}
+
+      {/* Automation — issue-driven autofix loop */}
+      <Section title="Automation">
+        <SelectField
+          name="issueAutofixMode"
+          label="Issue autofix loop"
+          value={issueAutofixMode}
+          readOnly={readOnly}
+          options={[
+            { value: 'off', label: 'Off — do not sync bug issues' },
+            { value: 'notify', label: 'Notify — surface candidates for one-click fix' },
+            { value: 'autonomous', label: 'Autonomous — auto-dispatch on unmatched bugs' },
+          ]}
+        />
+      </Section>
 
       {/* Sync settings */}
       <Section title="Sync">
@@ -151,6 +169,27 @@ function TextareaField({
         id={name} name={name} defaultValue={value} readOnly={readOnly} placeholder={placeholder} rows={4}
         className="w-full rounded-md border border-border bg-bg px-3 py-1.5 font-mono text-xs text-fg read-only:opacity-60 focus:border-accent focus:outline-none"
       />
+    </div>
+  );
+}
+
+function SelectField({
+  name, label, value, readOnly, options,
+}: {
+  name: string; label: string; value: string; readOnly: boolean;
+  options: Array<{ value: string; label: string }>;
+}) {
+  return (
+    <div className="sm:col-span-2">
+      <label htmlFor={name} className="mb-1 block text-xs text-fg-muted">{label}</label>
+      <select
+        id={name} name={name} defaultValue={value} disabled={readOnly}
+        className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg disabled:opacity-60 focus:border-accent focus:outline-none"
+      >
+        {options.map((o) => (
+          <option key={o.value} value={o.value}>{o.label}</option>
+        ))}
+      </select>
     </div>
   );
 }

@@ -30,6 +30,16 @@ export interface CiFailedCheck {
   completedAt: string | null;
 }
 
+export type IssueAutofixMode = 'off' | 'notify' | 'autonomous';
+
+export type IssueAutofixCandidateStatus =
+  | 'pending_match'
+  | 'matched_to_pr'
+  | 'unmatched'
+  | 'notified'
+  | 'dispatched'
+  | 'resolved';
+
 export type CiAttributionVerdict = 'ours' | 'unrelated' | 'flaky' | 'unsure';
 export type CiAttributionMethod = 'base-branch-control' | 'llm' | 'degraded';
 
@@ -57,6 +67,7 @@ export interface Database {
           installation_id: string | null;
           config: Json;
           meta: Json;
+          issue_autofix_mode: IssueAutofixMode;
           created_at: string;
           updated_at: string;
         };
@@ -148,6 +159,50 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database['public']['Tables']['flow_events']['Insert']>;
+      };
+      pull_requests: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          number: number;
+          title: string;
+          body: string;
+          state: string;
+          author: string;
+          html_url: string;
+          head_sha: string | null;
+          head_ref: string | null;
+          base_ref: string | null;
+          referenced_issues: number[];
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['pull_requests']['Row'], 'id' | 'created_at' | 'updated_at'> & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['pull_requests']['Insert']>;
+      };
+      issue_autofix_candidates: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          issue_number: number;
+          status: IssueAutofixCandidateStatus;
+          matched_pr_number: number | null;
+          matched_reason: string | null;
+          dispatched_flow_id: string | null;
+          last_checked_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['issue_autofix_candidates']['Row'], 'id' | 'created_at' | 'updated_at'> & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['issue_autofix_candidates']['Insert']>;
       };
       user_github_tokens: {
         Row: {

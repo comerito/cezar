@@ -5,14 +5,20 @@ import { SettingsForm } from './settings-form';
 import { TeamSection } from './team-section';
 import type { WorkspaceRole } from '@/lib/supabase/types';
 
-async function loadWorkspaceConfig(workspaceId: string): Promise<Record<string, unknown>> {
+async function loadWorkspaceConfig(workspaceId: string): Promise<{
+  config: Record<string, unknown>;
+  issueAutofixMode: 'off' | 'notify' | 'autonomous';
+}> {
   const supabase = createSupabaseAdminClient();
   const { data } = await supabase
     .from('workspaces')
-    .select('config')
+    .select('config, issue_autofix_mode')
     .eq('id', workspaceId)
     .single();
-  return (data?.config as Record<string, unknown>) ?? {};
+  return {
+    config: (data?.config as Record<string, unknown>) ?? {},
+    issueAutofixMode: (data?.issue_autofix_mode as 'off' | 'notify' | 'autonomous') ?? 'off',
+  };
 }
 
 interface MemberRow {
@@ -66,7 +72,7 @@ export default async function SettingsPage() {
     );
   }
 
-  const [config, members] = await Promise.all([
+  const [{ config, issueAutofixMode }, members] = await Promise.all([
     loadWorkspaceConfig(workspace.id),
     loadMembers(workspace.id),
   ]);
@@ -90,7 +96,7 @@ export default async function SettingsPage() {
 
         <section>
           <h2 className="mb-4 text-lg font-semibold tracking-tight">Configuration</h2>
-          <SettingsForm config={config} readOnly={!isAdmin} />
+          <SettingsForm config={config} issueAutofixMode={issueAutofixMode} readOnly={!isAdmin} />
         </section>
       </div>
     </div>

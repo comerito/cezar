@@ -29,6 +29,37 @@ export interface TimelineCrossReference {
   merged: boolean;
 }
 
+export interface RawPullRequest {
+  number: number;
+  title: string;
+  body: string;
+  state: 'open' | 'closed';
+  author: string;
+  htmlUrl: string;
+  headSha: string | null;
+  headRef: string | null;
+  baseRef: string | null;
+  referencedIssues: number[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+// Pulls issue numbers referenced in PR titles/bodies. Catches the common
+// closing-keyword forms (closes/fixes/resolves #N, GH-N, owner/repo#N) plus
+// bare #N mentions — Phase 1 link-based matching treats any reference as a
+// signal, so precision here is less important than recall.
+export function extractReferencedIssues(text: string): number[] {
+  if (!text) return [];
+  const refs = new Set<number>();
+  const re = /(?<![A-Za-z0-9_])(?:GH-)?#(\d+)\b/gi;
+  let m: RegExpExecArray | null;
+  while ((m = re.exec(text)) !== null) {
+    const n = Number(m[1]);
+    if (Number.isFinite(n) && n > 0) refs.add(n);
+  }
+  return [...refs].sort((a, b) => a - b);
+}
+
 export interface CheckRunSummary {
   name: string;
   status: 'queued' | 'in_progress' | 'completed' | string;
@@ -121,6 +152,34 @@ export class GitHubService {
       return issues
         .filter(i => !i.pull_request)
         .map(i => this.mapIssue(i));
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async listOpenPullRequests(): Promise<RawPullRequest[]> {
+    try {
+      const prs = await this.octokit.paginate(this.octokit.rest.pulls.list, {
+        owner: this.owner,
+        repo: this.repo,
+        state: 'open',
+        per_page: 100,
+      });
+      return prs.map(p => ({
+        number: p.number,
+        title: p.title,
+        body: p.body ?? '',
+        state: p.state === 'closed' ? 'closed' : 'open',
+        author: p.user?.login ?? 'unknown',
+        htmlUrl: p.html_url,
+        headSha: p.head?.sha ?? null,
+        headRef: p.head?.ref ?? null,
+        baseRef: p.base?.ref ?? null,
+        referencedIssues: extractReferencedIssues(`${p.title}\n${p.body ?? ''}`),
+        createdAt: p.created_at,
+        updatedAt: p.updated_at,
+      }));
     } catch (error) {
       this.handleError(error);
       throw error;
