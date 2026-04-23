@@ -21,6 +21,14 @@ export async function fetchBaseBranch(repoRoot: string, remote: string, baseBran
   await runGit(repoRoot, ['fetch', '--prune', '--no-tags', remote, baseBranch]);
 }
 
+// Fetch a specific remote branch and create (or fast-forward) a local ref
+// that tracks it. Used by the CI follow-up flow: the PR branch exists on
+// origin but may not be present in the cron worker's fresh clone, so we
+// materialise a local branch here before createWorktree can attach to it.
+export async function fetchRemoteBranch(repoRoot: string, remote: string, branch: string): Promise<void> {
+  await runGit(repoRoot, ['fetch', '--no-tags', remote, `+refs/heads/${branch}:refs/heads/${branch}`]);
+}
+
 async function runGit(cwd: string, args: string[]): Promise<string> {
   try {
     const { stdout } = await execFileAsync('git', args, { cwd, maxBuffer: 10 * 1024 * 1024 });

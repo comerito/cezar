@@ -3,25 +3,47 @@ import type { Config } from '../../config/config.model.js';
 import type { IssueStore } from '../../store/store.js';
 import type { StoredIssue } from '../../store/store.model.js';
 import { GitHubService } from '../../services/github.service.js';
-import { createWorktree, commitAll, getDiffAgainstBase } from './worktree.js';
+import { createWorktree, commitAll, getDiffAgainstBase, fetchRemoteBranch } from './worktree.js';
+import { runSetupCommand } from './setup-runner.js';
 import { TokenBudget } from './token-budget.js';
 import { runAgentSession, type AgentEvent } from './agent-session.js';
-import { ANALYZER_SYSTEM_PROMPT, RootCauseSchema, buildAnalyzerUserPrompt, type RootCause } from './prompts/analyzer.js';
+import { ANALYZER_SYSTEM_PROMPT, AnalyzerResultSchema, isNoActionNeeded, buildAnalyzerUserPrompt, type RootCause } from './prompts/analyzer.js';
 import { FIXER_SYSTEM_PROMPT, FixReportSchema, buildFixerUserPrompt, type FixReport } from './prompts/fixer.js';
 import { REVIEWER_SYSTEM_PROMPT, ReviewVerdictSchema, buildReviewerUserPrompt, normalizeVerdict, retryNotesFromVerdict, fallbackVerdictFromProse, type ReviewVerdict } from './prompts/reviewer.js';
 
 export type OrchestratorOutcome =
-  | { status: 'pr-opened'; prUrl: string; prNumber: number; branch: string; rootCause: RootCause; verdict: ReviewVerdict }
+  | { status: 'pr-opened'; prUrl: string; prNumber: number; branch: string; headSha: string; rootCause: RootCause; verdict: ReviewVerdict }
   | { status: 'skipped'; reason: string }
   | { status: 'failed'; reason: string; rootCause?: RootCause; fixReport?: FixReport; verdict?: ReviewVerdict; branch?: string }
   | { status: 'dry-run'; rootCause: RootCause; fixReport: FixReport; verdict: ReviewVerdict; branch: string; diff: string };
 
+export interface CiFollowupInput {
+  issueNumber: number;
+  prNumber: number;
+  branch: string;
+  attemptIndex: number;    // 1-based — which follow-up attempt this is for the flow
+  attemptMax: number;
+  attribution: {
+    reasoning: string;
+    suggestedFocus?: string;
+    preExistingChecks?: string[];
+  };
+  failedCheckNames: string[];
+  logTails?: Array<{ checkName: string; lines: string[] }>;
+}
+
+export type CiFollowupOutcome =
+  | { status: 'pushed'; branch: string; headSha: string; verdict: Required<ReviewVerdict>; fixReport: FixReport }
+  | { status: 'skipped'; reason: string }
+  | { status: 'failed'; reason: string; branch?: string; verdict?: Required<ReviewVerdict>; fixReport?: FixReport };
+
 // Per-attempt result from runOneAttempt. Only 'review-failed' is retriable;
 // other failure kinds bail out of the retry loop immediately.
 type AttemptOutcome =
-  | { kind: 'pr-opened'; prUrl: string; prNumber: number; rootCause: RootCause; fixReport: FixReport; verdict: Required<ReviewVerdict> }
+  | { kind: 'pr-opened'; prUrl: string; prNumber: number; headSha: string; rootCause: RootCause; fixReport: FixReport; verdict: Required<ReviewVerdict> }
   | { kind: 'dry-run'; rootCause: RootCause; fixReport: FixReport; verdict: Required<ReviewVerdict>; diff: string }
   | { kind: 'user-declined' }
+  | { kind: 'no-action-needed'; reason: string }
   | { kind: 'review-failed'; reason: string; rootCause: RootCause; fixReport: FixReport; verdict: Required<ReviewVerdict> }
   | { kind: 'hard-failed'; reason: string; rootCause?: RootCause; fixReport?: FixReport };
 
@@ -105,6 +127,30 @@ export class AutofixOrchestrator {
       this.store.setAnalysis(issueNumber, { autofixWorktreePath: worktree.path, autofixBranch: branch });
       await this.store.save();
 
+      // Run any user-configured env setup (yarn install, db migrate, etc.)
+      // before the analyzer/fixer touch the worktree. Each attempt re-runs
+      // setup because every retry creates a fresh worktree.
+      if (cfg.setupCommands && cfg.setupCommands.length > 0) {
+        opts.onEvent?.(`[#${issueNumber}] SETUP — running ${cfg.setupCommands.length} command(s)`);
+        for (const command of cfg.setupCommands) {
+          opts.onEvent?.(`[#${issueNumber}] $ ${command}`);
+          const result = await runSetupCommand(command, worktree.path, (line) => {
+            opts.onEvent?.(`  ${line}`);
+          });
+          if (!result.ok) {
+            await worktree.dispose().catch(() => {});
+            const tail = (result.stderr || result.stdout).split('\n').slice(-5).join(' | ').trim();
+            return this.recordFailure(
+              issueNumber,
+              `env setup failed: \`${command}\` exited ${result.exitCode}${tail ? ` — ${tail}` : ''}`,
+              totalTokens,
+              undefined,
+              branch,
+            );
+          }
+        }
+      }
+
       const budget = new TokenBudget(cfg.tokenBudgetPerAttempt);
       let outcome: AttemptOutcome;
       try {
@@ -161,6 +207,7 @@ export class AutofixOrchestrator {
             prUrl: outcome.prUrl,
             prNumber: outcome.prNumber,
             branch,
+            headSha: outcome.headSha,
             rootCause: outcome.rootCause,
             verdict: outcome.verdict,
           };
@@ -180,6 +227,21 @@ export class AutofixOrchestrator {
         this.store.setAnalysis(issueNumber, { autofixStatus: 'skipped', autofixWorktreePath: null });
         await this.store.save();
         return { status: 'skipped', reason: 'user declined after analysis' };
+      }
+
+      if (outcome.kind === 'no-action-needed') {
+        await worktree.dispose();
+        this.store.setAnalysis(issueNumber, {
+          autofixStatus: 'skipped',
+          autofixWorktreePath: null,
+          autofixAttempts: globalAttempt,
+          autofixLastRunAt: new Date().toISOString(),
+          autofixTokensUsed: totalTokens,
+          autofixLastError: null,
+        });
+        await this.store.save();
+        opts.onEvent?.(`[#${issueNumber}] SKIPPED — ${outcome.reason}`);
+        return { status: 'skipped', reason: outcome.reason };
       }
 
       // All remaining kinds are failures. Narrow verdict/fixReport access.
@@ -261,7 +323,7 @@ export class AutofixOrchestrator {
       cwd: worktree.path,
       allowedTools: ['Read', 'Grep', 'Glob', 'Bash'],
       bashAllowlist: ['git log', 'git diff', 'git show', 'git status'],
-      responseSchema: RootCauseSchema,
+      responseSchema: AnalyzerResultSchema,
       model: cfg.models.analyzer,
       maxTurns: cfg.maxTurns.analyzer,
       tokenBudget: budget,
@@ -269,7 +331,19 @@ export class AutofixOrchestrator {
     });
 
     if (analyzer.budgetExceeded) return { kind: 'hard-failed', reason: 'token budget exceeded during analysis' };
-    if (!analyzer.parsed) return { kind: 'hard-failed', reason: 'analyzer did not return a valid RootCause' };
+    if (!analyzer.parsed) {
+      const tail = analyzer.text.slice(-400).trim();
+      return {
+        kind: 'hard-failed',
+        reason: tail
+          ? `analyzer did not return a valid JSON response. Last output: "${tail}"`
+          : 'analyzer returned no parseable output (likely hit maxTurns without emitting JSON)',
+      };
+    }
+
+    if (isNoActionNeeded(analyzer.parsed)) {
+      return { kind: 'no-action-needed', reason: analyzer.parsed.reason };
+    }
 
     const rootCause = analyzer.parsed;
     if (rootCause.confidence < cfg.minAnalyzerConfidence) {
@@ -376,7 +450,193 @@ export class AutofixOrchestrator {
       labels: cfg.prLabels,
     });
 
-    return { kind: 'pr-opened', prUrl: pr.url, prNumber: pr.number, rootCause, fixReport, verdict };
+    return { kind: 'pr-opened', prUrl: pr.url, prNumber: pr.number, headSha: commitSha, rootCause, fixReport, verdict };
+  }
+
+  /**
+   * Follow-up attempt triggered after attribution concludes a CI failure on
+   * an already-opened autofix PR was caused by our changes. Unlike
+   * processIssue, this:
+   *   - starts from the EXISTING PR branch, not baseBranch
+   *   - skips the analyzer (attribution already told us what to focus on)
+   *   - pushes new commits to the same branch (PR auto-updates)
+   *   - does NOT open a new PR
+   *   - posts a PR comment explaining what changed
+   *
+   * One attempt per call. The ci-fix cron loops if attempts remain.
+   */
+  async processCiFollowup(input: CiFollowupInput, opts: OrchestratorOptions): Promise<CiFollowupOutcome> {
+    const cfg = this.config.autofix;
+    if (!cfg || !cfg.enabled) return { status: 'skipped', reason: 'autofix disabled in config' };
+    if (!cfg.repoRoot) return { status: 'skipped', reason: 'autofix.repoRoot not set' };
+
+    const issue = this.store.getIssue(input.issueNumber);
+    if (!issue) return { status: 'skipped', reason: `issue #${input.issueNumber} not found in store` };
+
+    const repoRoot = resolve(cfg.repoRoot);
+    const issueData = await this.github.getIssueWithComments(input.issueNumber);
+
+    opts.onEvent?.(`[#${input.issueNumber}] CI-FIX ${input.attemptIndex}/${input.attemptMax} — fetching branch ${input.branch}`);
+
+    // Materialise the PR branch locally. The follow-up worktree attaches to
+    // the existing branch (resetBranch:false) so the prior autofix commits
+    // stay — we're extending the PR, not replacing it.
+    try {
+      await fetchRemoteBranch(repoRoot, cfg.remote, input.branch);
+    } catch (err) {
+      return { status: 'failed', reason: `failed to fetch ${cfg.remote}/${input.branch}: ${(err as Error).message}`, branch: input.branch };
+    }
+
+    let worktree;
+    try {
+      worktree = await createWorktree({
+        repoRoot,
+        branch: input.branch,
+        baseBranch: cfg.baseBranch,
+        remote: cfg.remote,
+        fetchRemote: cfg.fetchBeforeAttempt,
+        resetBranch: false,
+      });
+    } catch (err) {
+      return { status: 'failed', reason: `worktree setup failed: ${(err as Error).message}`, branch: input.branch };
+    }
+
+    // Re-run setup commands (fresh worktree, no deps installed yet).
+    if (cfg.setupCommands && cfg.setupCommands.length > 0) {
+      opts.onEvent?.(`[#${input.issueNumber}] CI-FIX SETUP — running ${cfg.setupCommands.length} command(s)`);
+      for (const command of cfg.setupCommands) {
+        opts.onEvent?.(`[#${input.issueNumber}] $ ${command}`);
+        const result = await runSetupCommand(command, worktree.path, (line) => {
+          opts.onEvent?.(`  ${line}`);
+        });
+        if (!result.ok) {
+          await worktree.dispose().catch(() => {});
+          const tail = (result.stderr || result.stdout).split('\n').slice(-5).join(' | ').trim();
+          return {
+            status: 'failed',
+            reason: `env setup failed: \`${command}\` exited ${result.exitCode}${tail ? ` — ${tail}` : ''}`,
+            branch: input.branch,
+          };
+        }
+      }
+    }
+
+    const budget = new TokenBudget(cfg.ciFixTokenBudget ?? cfg.tokenBudgetPerAttempt);
+
+    // Attribution IS our root-cause diagnosis. Confidence=1 because the
+    // attributor already cleared the "is this ours?" hurdle; the fixer
+    // shouldn't second-guess that.
+    const rootCause: RootCause = {
+      summary: input.attribution.suggestedFocus
+        ? `CI follow-up: ${input.attribution.suggestedFocus}`
+        : `CI failure on PR #${input.prNumber} attributed to this autofix`,
+      hypothesis: input.attribution.reasoning,
+      suspectedFiles: [],
+      reproductionNotes: input.failedCheckNames.length > 0
+        ? `Failing CI checks: ${input.failedCheckNames.join(', ')}`
+        : undefined,
+      confidence: 1,
+    };
+
+    const priorAttemptNotes = buildCiFollowupNotes(input);
+
+    opts.onEvent?.(`[#${input.issueNumber}] CI-FIX FIX — implementing adjustment`);
+    const fixer = await runAgentSession({
+      systemPrompt: FIXER_SYSTEM_PROMPT,
+      userPrompt: buildFixerUserPrompt({
+        issueNumber: input.issueNumber,
+        title: issueData.issue.title,
+        rootCause,
+        priorAttemptNotes,
+      }),
+      cwd: worktree.path,
+      allowedTools: cfg.allowedTools,
+      bashAllowlist: cfg.bashAllowlist,
+      responseSchema: FixReportSchema,
+      model: cfg.models.fixer,
+      maxTurns: cfg.maxTurns.fixer,
+      tokenBudget: budget,
+      onEvent: opts.onAgentEvent,
+    });
+
+    if (fixer.budgetExceeded) {
+      await worktree.dispose().catch(() => {});
+      return { status: 'failed', reason: 'token budget exceeded during CI follow-up fix', branch: input.branch };
+    }
+    if (!fixer.parsed) {
+      await worktree.dispose().catch(() => {});
+      return { status: 'failed', reason: 'fixer did not return a valid FixReport for CI follow-up', branch: input.branch };
+    }
+    const fixReport = fixer.parsed;
+
+    opts.onEvent?.(`[#${input.issueNumber}] CI-FIX COMMIT — staging changes`);
+    const commitMessage = buildCiFollowupCommitMessage(input, issueData.issue.title, fixReport);
+    const commitSha = await commitAll(worktree.path, commitMessage);
+    if (!commitSha) {
+      await worktree.dispose().catch(() => {});
+      return { status: 'skipped', reason: 'fixer made no file changes — CI failure may no longer reproduce' };
+    }
+
+    const diff = await getDiffAgainstBase(worktree.path, cfg.baseBranch);
+
+    opts.onEvent?.(`[#${input.issueNumber}] CI-FIX REVIEW — running code review`);
+    const reviewer = await runAgentSession({
+      systemPrompt: REVIEWER_SYSTEM_PROMPT,
+      userPrompt: buildReviewerUserPrompt({
+        issueNumber: input.issueNumber,
+        title: issueData.issue.title,
+        rootCause,
+        fixReport,
+        diff,
+        baseBranch: cfg.baseBranch,
+      }),
+      cwd: worktree.path,
+      allowedTools: ['Read', 'Grep', 'Glob'],
+      responseSchema: ReviewVerdictSchema,
+      model: cfg.models.reviewer,
+      maxTurns: cfg.maxTurns.reviewer,
+      tokenBudget: budget,
+      onEvent: opts.onAgentEvent,
+    });
+
+    const verdict: Required<ReviewVerdict> = reviewer.parsed
+      ? normalizeVerdict(reviewer.parsed)
+      : fallbackVerdictFromProse(reviewer.text);
+
+    const blockers = verdict.issues.filter(i => i.severity === 'blocker').length;
+    const passes = cfg.requireReviewPass ? verdict.verdict === 'pass' && blockers === 0 : blockers === 0;
+
+    if (!passes) {
+      await worktree.dispose().catch(() => {});
+      return {
+        status: 'failed',
+        reason: `CI follow-up review ${verdict.verdict} (${blockers} blocker(s))`,
+        verdict,
+        fixReport,
+        branch: input.branch,
+      };
+    }
+
+    opts.onEvent?.(`[#${input.issueNumber}] CI-FIX PUSH — updating PR #${input.prNumber}`);
+    try {
+      await this.github.pushBranch(input.branch, worktree.path, cfg.remote);
+    } catch (err) {
+      await worktree.dispose().catch(() => {});
+      return { status: 'failed', reason: `push failed: ${(err as Error).message}`, verdict, fixReport, branch: input.branch };
+    }
+
+    // PR-comment is best-effort — don't fail the attempt just because we
+    // couldn't attach a note. The commit itself is the source of truth.
+    try {
+      await this.github.addComment(input.prNumber, buildCiFollowupPrComment(input, fixReport, verdict));
+    } catch (err) {
+      opts.onEvent?.(`[#${input.issueNumber}] CI-FIX NOTE — could not post PR comment: ${(err as Error).message}`);
+    }
+
+    await worktree.dispose().catch(() => {});
+    opts.onEvent?.(`[#${input.issueNumber}] CI-FIX DONE — ${commitSha.slice(0, 8)} pushed to ${input.branch}`);
+
+    return { status: 'pushed', branch: input.branch, headSha: commitSha, verdict, fixReport };
   }
 
   private markRunning(issueNumber: number): void {
@@ -415,6 +675,71 @@ export class AutofixOrchestrator {
       branch,
     };
   }
+}
+
+function buildCiFollowupNotes(input: CiFollowupInput): string {
+  const parts: string[] = [];
+  parts.push('CI FAILURE CONTEXT — this is a follow-up adjustment. The prior autofix commit caused CI to fail.');
+  parts.push('');
+  parts.push(`Attribution reasoning:\n${input.attribution.reasoning}`);
+  if (input.attribution.suggestedFocus) {
+    parts.push(`\nSuggested focus:\n${input.attribution.suggestedFocus}`);
+  }
+  if (input.failedCheckNames.length > 0) {
+    parts.push(`\nFailing checks to make green: ${input.failedCheckNames.join(', ')}`);
+  }
+  if (input.logTails && input.logTails.length > 0) {
+    parts.push('\nFailing job log tails:');
+    for (const t of input.logTails) {
+      const tail = t.lines.slice(-40).join('\n');
+      parts.push(`\n### ${t.checkName}\n\`\`\`\n${tail}\n\`\`\``);
+    }
+  }
+  parts.push('\nMake the minimum change that turns the failing checks green without breaking the existing fix.');
+  return parts.join('\n');
+}
+
+function buildCiFollowupCommitMessage(input: CiFollowupInput, title: string, report: FixReport): string {
+  return `fix: CI follow-up for ${title} (#${input.issueNumber})
+
+${report.approach}
+
+Attempt ${input.attemptIndex}/${input.attemptMax} — addresses CI failure on PR #${input.prNumber}.
+
+Co-authored-by: cezar-autofix <noreply@cezar>
+`;
+}
+
+function buildCiFollowupPrComment(
+  input: CiFollowupInput,
+  fixReport: FixReport,
+  verdict: Required<ReviewVerdict>,
+): string {
+  const files = fixReport.changedFiles.length > 0
+    ? fixReport.changedFiles.map(f => `- \`${f}\``).join('\n')
+    : '_(none reported)_';
+  const tests = fixReport.testCommandsRun.length > 0
+    ? fixReport.testCommandsRun.map(c => `- \`${c}\``).join('\n')
+    : '_(none)_';
+  const focus = input.attribution.suggestedFocus ? `\n**Focus:** ${input.attribution.suggestedFocus}` : '';
+  return `## 🤖 Cezar CI follow-up (attempt ${input.attemptIndex}/${input.attemptMax})
+
+Cezar re-ran against the failing CI and pushed an adjustment.${focus}
+
+**Targeted failing checks:** ${input.failedCheckNames.join(', ') || '_(none listed)_'}
+
+**Approach:** ${fixReport.approach}
+
+**Files changed:**
+${files}
+
+**Verification:**
+${tests}
+
+**Automated review:** \`${verdict.verdict}\`
+${verdict.summary}
+
+A human reviewer should still confirm correctness before merge.`;
 }
 
 function buildCommitMessage(issueNumber: number, title: string, report: FixReport): string {

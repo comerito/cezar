@@ -29,6 +29,45 @@ export interface TimelineCrossReference {
   merged: boolean;
 }
 
+export interface CheckRunSummary {
+  name: string;
+  status: 'queued' | 'in_progress' | 'completed' | string;
+  conclusion: string | null;
+  htmlUrl: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export type CiOverall = 'pending' | 'success' | 'failure' | 'neutral' | 'unknown';
+
+export interface CiSummary {
+  overall: CiOverall;
+  total: number;
+  failedChecks: CheckRunSummary[];
+}
+
+// Pure aggregator — exported so it can be unit-tested with fixtures and
+// reused by the follow-up autofix flow in later phases.
+export function summarizeCi(checks: CheckRunSummary[]): CiSummary {
+  if (checks.length === 0) return { overall: 'unknown', total: 0, failedChecks: [] };
+
+  const FAIL = new Set(['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure']);
+  const PASS = new Set(['success']);
+  const NEUTRAL = new Set(['neutral', 'skipped', 'stale']);
+
+  const failedChecks = checks.filter(c => c.conclusion != null && FAIL.has(c.conclusion));
+  const anyPending = checks.some(c => c.status !== 'completed');
+
+  let overall: CiOverall;
+  if (failedChecks.length > 0) overall = 'failure';
+  else if (anyPending) overall = 'pending';
+  else if (checks.every(c => c.conclusion != null && PASS.has(c.conclusion))) overall = 'success';
+  else if (checks.every(c => c.conclusion != null && (PASS.has(c.conclusion) || NEUTRAL.has(c.conclusion)))) overall = 'neutral';
+  else overall = 'unknown';
+
+  return { overall, total: checks.length, failedChecks };
+}
+
 export class GitHubService {
   private octokit: Octokit;
   private owner: string;
@@ -428,6 +467,92 @@ export class GitHubService {
     }
   }
 
+  async listCheckRunsForSha(sha: string): Promise<CheckRunSummary[]> {
+    try {
+      const runs = await this.octokit.paginate(this.octokit.rest.checks.listForRef, {
+        owner: this.owner,
+        repo: this.repo,
+        ref: sha,
+        per_page: 100,
+      });
+      return runs.map(r => ({
+        name: r.name,
+        status: r.status as CheckRunSummary['status'],
+        conclusion: r.conclusion,
+        htmlUrl: r.html_url ?? null,
+        startedAt: r.started_at ?? null,
+        completedAt: r.completed_at ?? null,
+      }));
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async getCiStatus(sha: string): Promise<CiSummary> {
+    const checks = await this.listCheckRunsForSha(sha);
+    return summarizeCi(checks);
+  }
+
+  async getPullRequestDiff(prNumber: number): Promise<string> {
+    try {
+      const response = await this.octokit.rest.pulls.get({
+        owner: this.owner,
+        repo: this.repo,
+        pull_number: prNumber,
+        mediaType: { format: 'diff' },
+      });
+      // With format: 'diff', response.data is returned as a raw string.
+      return response.data as unknown as string;
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async listPullRequestFiles(prNumber: number): Promise<string[]> {
+    try {
+      const files = await this.octokit.paginate(this.octokit.rest.pulls.listFiles, {
+        owner: this.owner,
+        repo: this.repo,
+        pull_number: prNumber,
+        per_page: 100,
+      });
+      return files.map(f => f.filename);
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async downloadJobLogs(jobId: number): Promise<string> {
+    // Octokit follows the 302 redirect automatically and returns the log text.
+    try {
+      const response = await this.octokit.rest.actions.downloadJobLogsForWorkflowRun({
+        owner: this.owner,
+        repo: this.repo,
+        job_id: jobId,
+      });
+      return typeof response.data === 'string' ? response.data : String(response.data ?? '');
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  async reRunFailedJobs(runId: number): Promise<void> {
+    try {
+      await this.octokit.rest.actions.reRunWorkflowFailedJobs({
+        owner: this.owner,
+        repo: this.repo,
+        run_id: runId,
+      });
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
   async getIssueTimeline(issueNumber: number): Promise<TimelineCrossReference[]> {
     try {
       const events = await this.octokit.paginate(this.octokit.rest.issues.listEventsForTimeline, {
@@ -519,4 +644,18 @@ export class GitHubService {
       }
     }
   }
+}
+
+// Pure helper for CI attribution. GitHub Actions check-run html_urls follow
+// /{owner}/{repo}/actions/runs/{runId}/job/{jobId} (with optional #step:...
+// suffix). Checks from non-Actions providers return null — the attribution
+// worker should degrade gracefully when logs aren't available.
+export function parseCheckRunUrl(url: string | null | undefined): { runId: number; jobId: number } | null {
+  if (!url) return null;
+  const m = url.match(/\/actions\/runs\/(\d+)\/jobs?\/(\d+)/);
+  if (!m) return null;
+  const runId = Number(m[1]);
+  const jobId = Number(m[2]);
+  if (!Number.isFinite(runId) || !Number.isFinite(jobId)) return null;
+  return { runId, jobId };
 }

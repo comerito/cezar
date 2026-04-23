@@ -9,7 +9,20 @@ export const RootCauseSchema = z.object({
   confidence: z.number().min(0).max(1),
 });
 
+export const NoActionNeededSchema = z.object({
+  noActionNeeded: z.literal(true),
+  reason: z.string(),
+});
+
+export const AnalyzerResultSchema = z.union([NoActionNeededSchema, RootCauseSchema]);
+
 export type RootCause = z.infer<typeof RootCauseSchema>;
+export type NoActionNeeded = z.infer<typeof NoActionNeededSchema>;
+export type AnalyzerResult = z.infer<typeof AnalyzerResultSchema>;
+
+export function isNoActionNeeded(r: AnalyzerResult): r is NoActionNeeded {
+  return 'noActionNeeded' in r && r.noActionNeeded === true;
+}
 
 export const ANALYZER_SYSTEM_PROMPT = `You are the ANALYZER agent. Your single job is to locate the root cause of a GitHub issue.
 
@@ -22,14 +35,24 @@ RULES:
 
 ${ROOT_CAUSE_ANALYSIS_SKILL}
 
-OUTPUT — when ready, output ONLY a single JSON object (no markdown fences, no prose before or after) matching this schema:
+OUTPUT — when ready, output ONLY a single JSON object (no markdown fences, no prose before or after).
+
+If you have located a root cause that needs fixing, return:
 {
   "summary": "one-line description of the bug",
   "suspectedFiles": ["path/to/file.ts", "..."],
   "hypothesis": "2-4 sentences explaining the root cause",
   "reproductionNotes": "optional: how the bug is triggered",
   "confidence": 0.0 to 1.0
-}`;
+}
+
+If you determine NO code change is needed — for example the bug is already fixed on this branch, the reported behavior is intentional, the issue is not actually a bug, or you cannot reproduce — return:
+{
+  "noActionNeeded": true,
+  "reason": "one short paragraph explaining the conclusion. Cite commit hashes, file paths, or test names as evidence."
+}
+
+Always return exactly one of these two JSON shapes — never freeform prose, never an empty response. If you are uncertain whether a fix is needed, prefer the noActionNeeded shape over inventing a hypothesis.`;
 
 const BODY_MAX_CHARS = 3000;
 const COMMENT_MAX_CHARS = 800;

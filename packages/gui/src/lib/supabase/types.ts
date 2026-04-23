@@ -20,6 +20,30 @@ export type FlowStatus =
   | 'skipped'
   | 'pr-opened';
 
+export type CiStatus = 'pending' | 'success' | 'failure' | 'neutral' | 'unknown';
+
+export interface CiFailedCheck {
+  name: string;
+  conclusion: string | null;
+  htmlUrl: string | null;
+  startedAt: string | null;
+  completedAt: string | null;
+}
+
+export type CiAttributionVerdict = 'ours' | 'unrelated' | 'flaky' | 'unsure';
+export type CiAttributionMethod = 'base-branch-control' | 'llm' | 'degraded';
+
+export interface CiAttribution {
+  verdict: CiAttributionVerdict;
+  confidence: number;
+  method: CiAttributionMethod;
+  reasoning: string;
+  preExistingChecks: string[];
+  suggestedFocus?: string;
+  model?: string;
+  attributedAt: string;
+}
+
 export interface Database {
   public: {
     Tables: {
@@ -91,6 +115,16 @@ export interface Database {
           pr_number: number | null;
           outcome: Json | null;
           attempts: Json;
+          head_sha: string | null;
+          ci_status: CiStatus | null;
+          ci_checked_at: string | null;
+          ci_failed_checks: Json;
+          ci_attribution: Json | null;
+          ci_attribution_checked_at: string | null;
+          ci_flaky_reruns: number;
+          ci_attribution_in_progress: boolean;
+          ci_fix_attempts: number;
+          ci_fix_in_progress: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -114,6 +148,18 @@ export interface Database {
           created_at?: string;
         };
         Update: Partial<Database['public']['Tables']['flow_events']['Insert']>;
+      };
+      user_github_tokens: {
+        Row: {
+          user_id: string;
+          provider_token: string;
+          provider_refresh_token: string | null;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['user_github_tokens']['Row'], 'updated_at'> & {
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['user_github_tokens']['Insert']>;
       };
     };
   };

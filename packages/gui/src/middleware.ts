@@ -1,7 +1,9 @@
 import { createServerClient } from '@supabase/ssr';
 import { NextResponse, type NextRequest } from 'next/server';
 
-const PUBLIC_ROUTES = ['/login', '/auth/callback'];
+// /api/cron/* routes carry their own CRON_SECRET bearer check; they must
+// bypass the user-session gate here or the scheduler can't reach them.
+const PUBLIC_ROUTES = ['/login', '/auth/callback', '/api/cron'];
 
 export async function middleware(request: NextRequest) {
   let supabaseResponse = NextResponse.next({ request });

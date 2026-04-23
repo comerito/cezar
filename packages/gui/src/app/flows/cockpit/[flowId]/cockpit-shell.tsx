@@ -3,7 +3,7 @@
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { createSupabaseBrowserClient } from '@/lib/supabase/browser';
 import { confirmFlowRootCause, cancelFlow } from '@/app/flows/actions';
-import type { Database, FlowStatus, Json } from '@/lib/supabase/types';
+import type { Database, FlowStatus, CiStatus, CiFailedCheck, CiAttribution, Json } from '@/lib/supabase/types';
 import { cn } from '@/components/ui/cn';
 
 type FlowRow = Database['public']['Tables']['flows']['Row'];
@@ -15,13 +15,15 @@ interface CockpitShellProps {
   tokenBudgetLimit: number;
 }
 
-const STAGES = ['worktree', 'analyze', 'approval', 'fix', 'commit', 'review', 'push', 'pr'] as const;
+const STAGES = ['worktree', 'analyze', 'approval', 'fix', 'commit', 'review', 'push', 'pr', 'ci'] as const;
 
 function deriveStage(events: EventRow[]): string {
   const lifecycle = events
     .filter((e) => e.type === 'lifecycle')
     .map((e) => ((e.payload as any)?.message as string) ?? '');
   const last = lifecycle[lifecycle.length - 1]?.toLowerCase() ?? '';
+  // CI lifecycle messages all start with "CI —" (emitted by the cron).
+  if (last.startsWith('ci —') || last.startsWith('ci:')) return 'ci';
   if (last.includes('done') || last.includes('pr')) return 'pr';
   if (last.includes('push')) return 'push';
   if (last.includes('review')) return 'review';
@@ -34,12 +36,14 @@ function deriveStage(events: EventRow[]): string {
 }
 
 function deriveTokensUsed(events: EventRow[]): number {
+  // Each turn-end event carries the cumulative token count, not a per-turn
+  // delta — summing them inflates the total ~Nx where N = number of turns.
   let used = 0;
   for (const e of events) {
     if (e.type !== 'agent') continue;
     const p = e.payload as any;
     if (p?.type === 'turn-end' && typeof p.tokensUsed === 'number') {
-      used += p.tokensUsed;
+      used = p.tokensUsed;
     }
     if (p?.type === 'budget-exceeded' && typeof p.used === 'number') {
       return p.used;
@@ -52,10 +56,38 @@ export function CockpitShell({ flow, initialEvents, tokenBudgetLimit }: CockpitS
   const [events, setEvents] = useState<EventRow[]>(initialEvents);
   const [flowStatus, setFlowStatus] = useState<FlowStatus>(flow.status);
   const [flowOutcome, setFlowOutcome] = useState<Json | null>(flow.outcome);
+  const [ciStatus, setCiStatus] = useState<CiStatus | null>(flow.ci_status);
+  const [ciFailedChecks, setCiFailedChecks] = useState<CiFailedCheck[]>(
+    (flow.ci_failed_checks as unknown as CiFailedCheck[] | null) ?? [],
+  );
+  const [ciAttribution, setCiAttribution] = useState<CiAttribution | null>(
+    (flow.ci_attribution as unknown as CiAttribution | null) ?? null,
+  );
+  const [ciAttributionInProgress, setCiAttributionInProgress] = useState<boolean>(
+    flow.ci_attribution_in_progress ?? false,
+  );
+  const [ciFixAttempts, setCiFixAttempts] = useState<number>(flow.ci_fix_attempts ?? 0);
+  const [ciFixInProgress, setCiFixInProgress] = useState<boolean>(flow.ci_fix_in_progress ?? false);
   const feedRef = useRef<HTMLDivElement>(null);
   const seenEventIds = useRef(new Set(initialEvents.map((e) => e.id)));
 
-  const isTerminal = ['succeeded', 'failed', 'skipped', 'pr-opened'].includes(flowStatus);
+  // A 'pr-opened' flow stays live through CI resolution and, if CI fails,
+  // through attribution. Only becomes terminal once we've either confirmed
+  // green CI or recorded an attribution verdict for the failure.
+  const ciResolved = ciStatus != null && ciStatus !== 'pending';
+  const awaitingAttribution =
+    flowStatus === 'pr-opened' &&
+    ciStatus === 'failure' &&
+    (ciAttribution == null || ciAttributionInProgress);
+  // While a CI fix is running or pending to run (verdict='ours' with
+  // attempts remaining), the flow is still live — ci-fix cron is about
+  // to push new commits.
+  const awaitingCiFix =
+    flowStatus === 'pr-opened' &&
+    ciFixInProgress;
+  const isTerminal =
+    ['succeeded', 'failed', 'skipped'].includes(flowStatus) ||
+    (flowStatus === 'pr-opened' && ciResolved && !awaitingAttribution && !awaitingCiFix);
 
   // Broadcast subscription for live events (no RLS issues)
   useEffect(() => {
@@ -84,13 +116,19 @@ export function CockpitShell({ flow, initialEvents, tokenBudgetLimit }: CockpitS
     const interval = setInterval(async () => {
       const { data: updatedFlow } = await supabase
         .from('flows')
-        .select('status, outcome')
+        .select('status, outcome, ci_status, ci_failed_checks, ci_attribution, ci_attribution_in_progress, ci_fix_attempts, ci_fix_in_progress')
         .eq('id', flow.id)
         .single();
 
       if (updatedFlow) {
         setFlowStatus(updatedFlow.status as FlowStatus);
         setFlowOutcome(updatedFlow.outcome);
+        setCiStatus((updatedFlow.ci_status as CiStatus | null) ?? null);
+        setCiFailedChecks(((updatedFlow.ci_failed_checks as unknown as CiFailedCheck[] | null) ?? []));
+        setCiAttribution((updatedFlow.ci_attribution as unknown as CiAttribution | null) ?? null);
+        setCiAttributionInProgress(Boolean(updatedFlow.ci_attribution_in_progress));
+        setCiFixAttempts(Number(updatedFlow.ci_fix_attempts ?? 0));
+        setCiFixInProgress(Boolean(updatedFlow.ci_fix_in_progress));
       }
     }, 5000);
 
@@ -139,11 +177,17 @@ export function CockpitShell({ flow, initialEvents, tokenBudgetLimit }: CockpitS
               const currentIdx = STAGES.indexOf(currentStage as any);
               const isFailed = isTerminal && flowStatus === 'failed';
               const isSkipped = isTerminal && flowStatus === 'skipped';
-              const failedAtCurrent = (isFailed || isSkipped) && idx === currentIdx;
-              const done = idx < currentIdx || (isTerminal && !isFailed && !isSkipped);
+              // CI stage has its own success/failure semantics independent of
+              // flow.status (which stays 'pr-opened' once the PR is created).
+              const isCiStage = stage === 'ci';
+              const ciStageFailed = isCiStage && ciStatus === 'failure';
+              const ciStageDone = isCiStage && (ciStatus === 'success' || ciStatus === 'neutral');
+              const ciStageActive = isCiStage && (ciStatus == null || ciStatus === 'pending') && flowStatus === 'pr-opened';
+              const failedAtCurrent = ((isFailed || isSkipped) && idx === currentIdx) || ciStageFailed;
+              const done = idx < currentIdx || (isTerminal && !isFailed && !isSkipped && !isCiStage) || ciStageDone;
               const passedBeforeFailure = (isFailed || isSkipped) && idx < currentIdx;
-              const active = idx === currentIdx && !isTerminal;
-              const unreached = isTerminal && idx > currentIdx;
+              const active = (idx === currentIdx && !isTerminal && !isCiStage) || ciStageActive;
+              const unreached = isTerminal && idx > currentIdx && !isCiStage;
               return (
                 <div
                   key={stage}
@@ -204,6 +248,72 @@ export function CockpitShell({ flow, initialEvents, tokenBudgetLimit }: CockpitS
               </a>
             )}
           </div>
+
+          {flowStatus === 'pr-opened' && ciStatus != null && (
+            <>
+              <div className="mt-6 text-xs font-medium uppercase tracking-wider text-fg-subtle">CI</div>
+              <div className="mt-2 text-xs">
+                <span className={cn(
+                  'rounded-full px-2 py-0.5 font-medium uppercase',
+                  ciStatus === 'success' && 'bg-accent/20 text-accent',
+                  ciStatus === 'failure' && 'bg-danger/20 text-danger',
+                  ciStatus === 'pending' && 'bg-fg-subtle/20 text-fg-subtle',
+                  (ciStatus === 'neutral' || ciStatus === 'unknown') && 'bg-fg-subtle/20 text-fg-subtle',
+                )}>
+                  {ciStatus}
+                </span>
+              </div>
+              {ciFailedChecks.length > 0 && (
+                <div className="mt-2 space-y-1 text-xs">
+                  <div className="text-fg-muted">Failed checks:</div>
+                  {ciFailedChecks.map((c) => (
+                    <div key={c.name} className="truncate text-fg-subtle">
+                      {c.htmlUrl ? (
+                        <a href={c.htmlUrl} target="_blank" rel="noreferrer" className="text-danger hover:underline">
+                          {c.name}
+                        </a>
+                      ) : (
+                        <span className="text-danger">{c.name}</span>
+                      )}
+                      {c.conclusion && <span className="ml-1 text-fg-subtle">({c.conclusion})</span>}
+                    </div>
+                  ))}
+                </div>
+              )}
+
+              {ciStatus === 'failure' && (
+                <>
+                  <div className="mt-4 text-xs font-medium uppercase tracking-wider text-fg-subtle">Attribution</div>
+                  {ciAttribution ? (
+                    <AttributionCard attribution={ciAttribution} />
+                  ) : ciAttributionInProgress ? (
+                    <div className="mt-2 text-xs text-fg-muted">
+                      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                      <span className="ml-2">Analyzing failure…</span>
+                    </div>
+                  ) : (
+                    <div className="mt-2 text-xs text-fg-muted">Queued — next attribution tick.</div>
+                  )}
+                </>
+              )}
+
+              {(ciFixAttempts > 0 || ciFixInProgress) && (
+                <>
+                  <div className="mt-4 text-xs font-medium uppercase tracking-wider text-fg-subtle">Follow-up fix</div>
+                  <div className="mt-2 flex items-center gap-2 text-xs">
+                    {ciFixInProgress && (
+                      <span className="inline-block h-1.5 w-1.5 animate-pulse rounded-full bg-accent" />
+                    )}
+                    <span className="text-fg-muted">
+                      {ciFixInProgress
+                        ? `Running attempt ${ciFixAttempts + 1}…`
+                        : `${ciFixAttempts} attempt${ciFixAttempts === 1 ? '' : 's'} pushed`}
+                    </span>
+                  </div>
+                </>
+              )}
+            </>
+          )}
 
           {!isTerminal && (
             <div className="mt-6 flex items-center gap-1.5 text-xs text-fg-subtle">
@@ -330,6 +440,45 @@ function ApprovalCard({ flowId, confirmation }: { flowId: string; confirmation: 
           Skip
         </button>
       </div>
+    </div>
+  );
+}
+
+function AttributionCard({ attribution }: { attribution: CiAttribution }) {
+  const tone: Record<CiAttribution['verdict'], string> = {
+    ours: 'bg-danger/20 text-danger',
+    unrelated: 'bg-fg-subtle/20 text-fg-subtle',
+    flaky: 'bg-yellow-500/20 text-yellow-400',
+    unsure: 'bg-fg-subtle/20 text-fg-subtle',
+  };
+  const label: Record<CiAttribution['verdict'], string> = {
+    ours: 'Ours',
+    unrelated: 'Unrelated',
+    flaky: 'Flaky',
+    unsure: 'Unsure',
+  };
+  const pct = Math.round(attribution.confidence * 100);
+  return (
+    <div className="mt-2 space-y-2">
+      <div className="flex items-center gap-2 text-xs">
+        <span className={cn('rounded-full px-2 py-0.5 font-medium uppercase', tone[attribution.verdict])}>
+          {label[attribution.verdict]}
+        </span>
+        <span className="text-fg-muted">{pct}%</span>
+        <span className="text-fg-subtle">· {attribution.method}</span>
+      </div>
+      <div className="text-xs text-fg-muted">{attribution.reasoning}</div>
+      {attribution.suggestedFocus && (
+        <div className="rounded-md border border-border/60 bg-bg-subtle/40 p-2 text-xs text-fg-subtle">
+          <div className="mb-0.5 text-fg-muted">Suggested focus</div>
+          {attribution.suggestedFocus}
+        </div>
+      )}
+      {attribution.preExistingChecks.length > 0 && (
+        <div className="text-xs text-fg-subtle">
+          Pre-existing on base: {attribution.preExistingChecks.join(', ')}
+        </div>
+      )}
     </div>
   );
 }

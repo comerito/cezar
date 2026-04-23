@@ -51,10 +51,19 @@ export function SettingsForm({ config, readOnly }: SettingsFormProps) {
         <NumberField name="autofix.tokenBudgetPerAttempt" label="Token budget per attempt" value={val(autofix.tokenBudgetPerAttempt, 250000)} readOnly={readOnly} />
         <RangeField name="autofix.minBugConfidence" label="Min bug confidence" value={val(autofix.minBugConfidence, 0.7)} readOnly={readOnly} />
         <RangeField name="autofix.minAnalyzerConfidence" label="Min analyzer confidence" value={val(autofix.minAnalyzerConfidence, 0.5)} readOnly={readOnly} />
+        <RangeField name="autofix.autoProceedConfidence" label="Auto-proceed at confidence ≥ (0 = always ask)" value={val(autofix.autoProceedConfidence, 0)} readOnly={readOnly} />
         <Toggle name="autofix.requireReviewPass" label="Require review pass" checked={autofix.requireReviewPass !== false} readOnly={readOnly} />
         <Toggle name="autofix.retryOnReviewFailure" label="Retry on review failure" checked={autofix.retryOnReviewFailure !== false} readOnly={readOnly} />
         <Toggle name="autofix.draftPr" label="Draft PR" checked={autofix.draftPr !== false} readOnly={readOnly} />
         <TextField name="autofix.prLabels" label="PR labels (comma-separated)" value={str((autofix.prLabels as string[] | undefined)?.join(', '), 'cezar-autofix')} readOnly={readOnly} />
+        <TextareaField
+          name="autofix.setupCommands"
+          label="Setup commands (one per line — runs at the start of each attempt before the analyzer)"
+          value={(autofix.setupCommands as string[] | undefined)?.join('\n') ?? ''}
+          readOnly={readOnly}
+          placeholder={'yarn install\nyarn migrate'}
+          spanFull
+        />
       </Section>
 
       {/* Models */}
@@ -124,6 +133,23 @@ function RangeField({ name, label, value, readOnly }: { name: string; label: str
       <input
         id={name} name={name} type="number" step="0.05" min="0" max="1" defaultValue={value} readOnly={readOnly}
         className="w-full rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg read-only:opacity-60 focus:border-accent focus:outline-none"
+      />
+    </div>
+  );
+}
+
+function TextareaField({
+  name, label, value, readOnly, placeholder, spanFull,
+}: {
+  name: string; label: string; value: string; readOnly: boolean;
+  placeholder?: string; spanFull?: boolean;
+}) {
+  return (
+    <div className={spanFull ? 'sm:col-span-2' : undefined}>
+      <label htmlFor={name} className="mb-1 block text-xs text-fg-muted">{label}</label>
+      <textarea
+        id={name} name={name} defaultValue={value} readOnly={readOnly} placeholder={placeholder} rows={4}
+        className="w-full rounded-md border border-border bg-bg px-3 py-1.5 font-mono text-xs text-fg read-only:opacity-60 focus:border-accent focus:outline-none"
       />
     </div>
   );

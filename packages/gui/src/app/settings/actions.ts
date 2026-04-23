@@ -34,10 +34,15 @@ export async function saveWorkspaceConfig(
       tokenBudgetPerAttempt: num(formData, 'autofix.tokenBudgetPerAttempt', 250000),
       minBugConfidence: float(formData, 'autofix.minBugConfidence', 0.7),
       minAnalyzerConfidence: float(formData, 'autofix.minAnalyzerConfidence', 0.5),
+      autoProceedConfidence: float(formData, 'autofix.autoProceedConfidence', 0),
       requireReviewPass: bool(formData, 'autofix.requireReviewPass'),
       retryOnReviewFailure: bool(formData, 'autofix.retryOnReviewFailure'),
       draftPr: bool(formData, 'autofix.draftPr'),
       prLabels: str(formData, 'autofix.prLabels', 'cezar-autofix').split(',').map((s) => s.trim()).filter(Boolean),
+      setupCommands: ((formData.get('autofix.setupCommands') as string) ?? '')
+        .split('\n')
+        .map((s) => s.trim())
+        .filter(Boolean),
       models: {
         analyzer: str(formData, 'autofix.models.analyzer', 'claude-sonnet-4-20250514'),
         fixer: str(formData, 'autofix.models.fixer', 'claude-sonnet-4-20250514'),

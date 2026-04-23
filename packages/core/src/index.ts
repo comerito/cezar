@@ -25,8 +25,13 @@ export { loadConfig } from './config/loader.js';
 // Services
 export {
   GitHubService,
+  summarizeCi,
+  parseCheckRunUrl,
   type RawIssue,
   type TimelineCrossReference,
+  type CheckRunSummary,
+  type CiOverall,
+  type CiSummary,
 } from './services/github.service.js';
 export {
   LLMService,
@@ -110,6 +115,7 @@ export * from './actions/autofix/skills.js';
 export * from './actions/autofix/prompts/analyzer.js';
 export * from './actions/autofix/prompts/fixer.js';
 export * from './actions/autofix/prompts/reviewer.js';
+export * from './actions/autofix/ci-attribution.js';
 
 // Pipeline
 export * from './pipeline/index.js';

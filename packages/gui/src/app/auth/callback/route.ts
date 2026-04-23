@@ -24,8 +24,17 @@ export async function GET(request: NextRequest) {
       },
     );
 
-    const { error } = await supabase.auth.exchangeCodeForSession(code);
+    const { data, error } = await supabase.auth.exchangeCodeForSession(code);
     if (!error) {
+      const providerToken = data.session?.provider_token;
+      if (providerToken && data.user) {
+        await supabase.from('user_github_tokens').upsert({
+          user_id: data.user.id,
+          provider_token: providerToken,
+          provider_refresh_token: data.session?.provider_refresh_token ?? null,
+          updated_at: new Date().toISOString(),
+        });
+      }
       return NextResponse.redirect(`${origin}${next}`);
     }
   }

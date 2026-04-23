@@ -1,6 +1,5 @@
 'use server';
 
-import { revalidatePath } from 'next/cache';
 import { getSessionUser } from '@/lib/auth';
 import { getActiveWorkspace } from '@/lib/workspace';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
@@ -120,8 +119,6 @@ async function runSyncInBackground(
     }
 
     emit('done', `Sync complete — ${issues.length} issues, ${needDigest.length} digested`);
-    revalidatePath('/dashboard');
-    revalidatePath('/issues');
   } catch (err) {
     emit('error', (err as Error).message);
   } finally {

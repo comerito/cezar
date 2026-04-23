@@ -30,7 +30,12 @@ export interface PendingConfirmation {
   deferred: Deferred<'proceed' | 'skip'>;
 }
 
-const pendingConfirmations = new Map<string, PendingConfirmation>();
+// Hoisted onto globalThis so the Map survives Next.js dev HMR reloads.
+// Without this, the orchestrator (running in a long-lived background promise)
+// holds a reference to the original Map while a re-evaluated module gives
+// the server action a fresh empty Map — every Proceed click then misses.
+const pendingConfirmations: Map<string, PendingConfirmation> =
+  ((globalThis as any).__cezarPendingConfirmations ??= new Map<string, PendingConfirmation>());
 
 export function resolvePendingConfirmation(flowId: string, decision: 'proceed' | 'skip'): boolean {
   const pending = pendingConfirmations.get(flowId);

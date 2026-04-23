@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/ci-watch",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/ci-attribute",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/ci-fix",
+      "schedule": "* * * * *"
+    }
+  ]
+}

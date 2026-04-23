@@ -74,10 +74,18 @@ async function runOrchestrator(
 
     const github = new core.GitHubService(config);
 
+    const autoProceedThreshold = Number((config.autofix as any).autoProceedConfidence) || 0;
+
     const orchestrator = new core.AutofixOrchestrator(store, config, github);
     const outcome = await orchestrator.processIssue(issueNumber, {
       apply: mode === 'apply',
       confirmBeforeFix: async (rootCause, issue) => {
+        if (autoProceedThreshold > 0 && rootCause.confidence >= autoProceedThreshold) {
+          eventBridge.lifecycle(
+            `Auto-proceeding (confidence ${Math.round(rootCause.confidence * 100)}% ≥ threshold ${Math.round(autoProceedThreshold * 100)}%)`,
+          );
+          return true;
+        }
         const prompt = {
           issueNumber: issue.number,
           issueTitle: issue.title,
@@ -100,7 +108,11 @@ async function runOrchestrator(
         pr_url: 'prUrl' in outcome ? outcome.prUrl : null,
         pr_number: 'prNumber' in outcome ? outcome.prNumber : null,
         branch: 'branch' in outcome ? outcome.branch : null,
-      })
+        head_sha: 'headSha' in outcome ? outcome.headSha : null,
+        // Prime the CI watcher: pr-opened flows start as 'pending' so the
+        // Vercel cron picks them up on the next tick.
+        ci_status: outcome.status === 'pr-opened' ? 'pending' : null,
+      } as any)
       .eq('id', flowId);
 
     await store.save();
@@ -119,7 +131,34 @@ async function runOrchestrator(
 export async function confirmFlowRootCause(flowId: string, decision: 'proceed' | 'skip') {
   const user = await getSessionUser();
   if (!user) throw new Error('Not authenticated');
-  resolvePendingConfirmation(flowId, decision);
+  const supabase = createSupabaseAdminClient();
+  const resolved = resolvePendingConfirmation(flowId, decision);
+
+  if (!resolved) {
+    // Orchestrator process is gone (server restart, crash, or pre-globalThis
+    // HMR loss). Mark the flow failed so the cockpit modal closes and the
+    // user can retry instead of being stuck on a stale approval card.
+    await supabase
+      .from('flows')
+      .update({
+        status: 'failed',
+        outcome: {
+          status: 'failed',
+          reason: 'Orchestrator unreachable — likely a server restart. Retry the autofix from the issue page.',
+          pendingConfirmation: null,
+        } as any,
+      })
+      .eq('id', flowId);
+    revalidatePath(`/flows/cockpit/${flowId}`);
+    return;
+  }
+
+  // Clear pendingConfirmation immediately so the cockpit modal closes;
+  // the orchestrator will overwrite outcome again at the end.
+  await supabase
+    .from('flows')
+    .update({ outcome: { pendingConfirmation: null, decision } as any })
+    .eq('id', flowId);
   revalidatePath(`/flows/cockpit/${flowId}`);
 }
 
