@@ -7,6 +7,8 @@ import { createWorktree, commitAll, getDiffAgainstBase, fetchRemoteBranch } from
 import { runSetupCommand } from './setup-runner.js';
 import { TokenBudget } from './token-budget.js';
 import { runAgentSession, type AgentEvent } from './agent-session.js';
+import { LLMService } from '../../services/llm.service.js';
+import { buildDoneDetectorPrompt, DoneDetectorResponseSchema } from '../done-detector/prompt.js';
 import { ANALYZER_SYSTEM_PROMPT, AnalyzerResultSchema, isNoActionNeeded, buildAnalyzerUserPrompt, type RootCause } from './prompts/analyzer.js';
 import { FIXER_SYSTEM_PROMPT, FixReportSchema, buildFixerUserPrompt, type FixReport } from './prompts/fixer.js';
 import { REVIEWER_SYSTEM_PROMPT, ReviewVerdictSchema, buildReviewerUserPrompt, normalizeVerdict, retryNotesFromVerdict, fallbackVerdictFromProse, type ReviewVerdict } from './prompts/reviewer.js';
@@ -59,6 +61,7 @@ export class AutofixOrchestrator {
     private readonly store: IssueStore,
     private readonly config: Config,
     private readonly github: GitHubService,
+    private readonly llm = new LLMService(config),
   ) {}
 
   async processIssue(issueNumber: number, opts: OrchestratorOptions): Promise<OrchestratorOutcome> {
@@ -77,6 +80,9 @@ export class AutofixOrchestrator {
     if ((issue.analysis.bugConfidence ?? 0) < cfg.minBugConfidence) {
       return { status: 'skipped', reason: `bug confidence ${issue.analysis.bugConfidence} below threshold ${cfg.minBugConfidence}` };
     }
+    if (issue.analysis.doneDetected === true) {
+      return { status: 'skipped', reason: issue.analysis.doneReason ?? 'issue already appears resolved by a merged PR' };
+    }
     if (issue.analysis.autofixStatus === 'pr-opened') {
       return { status: 'skipped', reason: 'PR already opened' };
     }
@@ -91,9 +97,14 @@ export class AutofixOrchestrator {
     const repoRoot = resolve(cfg.repoRoot);
     const branch = `${cfg.branchPrefix}${issue.number}`;
 
-    this.markRunning(issueNumber);
-
     const issueData = await this.github.getIssueWithComments(issueNumber);
+
+    const preflightSkip = await this.runAlreadyFixedPreflight(issue, opts);
+    if (preflightSkip) {
+      return { status: 'skipped', reason: preflightSkip };
+    }
+
+    this.markRunning(issueNumber);
 
     // In-session retry loop. Each iteration is one full analyze → fix → review
     // attempt with its own fresh worktree and token budget. Review failures
@@ -286,6 +297,53 @@ export class AutofixOrchestrator {
     // Loop exhausted — shouldn't reach here because the last iteration always
     // returns, but guard anyway.
     return lastOutcome ?? { status: 'failed', reason: 'retry loop exhausted with no outcome', branch };
+  }
+
+  private async runAlreadyFixedPreflight(issue: StoredIssue, opts: OrchestratorOptions): Promise<string | null> {
+    let mergedPRs;
+    try {
+      mergedPRs = await this.github.getIssueTimeline(issue.number);
+    } catch (err) {
+      opts.onEvent?.(`[#${issue.number}] PREFLIGHT — timeline lookup failed, continuing (${(err as Error).message})`);
+      return null;
+    }
+
+    if (mergedPRs.length === 0) return null;
+
+    const doneMergedPRs = mergedPRs.map(pr => ({ prNumber: pr.prNumber, prTitle: pr.prTitle }));
+
+    if (!issue.digest) {
+      opts.onEvent?.(`[#${issue.number}] PREFLIGHT — merged PR references found but digest is missing, continuing`);
+      return null;
+    }
+
+    opts.onEvent?.(`[#${issue.number}] PREFLIGHT — checking ${doneMergedPRs.length} merged PR reference(s) for an existing fix`);
+
+    try {
+      const parsed = await this.llm.analyze(
+        buildDoneDetectorPrompt([{ issue, mergedPRs: doneMergedPRs }]),
+        DoneDetectorResponseSchema,
+      );
+      const result = parsed?.results.find(r => r.number === issue.number);
+      if (!result) return null;
+
+      this.store.setAnalysis(issue.number, {
+        doneDetected: result.isDone,
+        doneConfidence: result.confidence,
+        doneReason: result.reason,
+        doneDraftComment: result.draftComment || null,
+        doneMergedPRs,
+        doneAnalyzedAt: new Date().toISOString(),
+      });
+      await this.store.save();
+
+      if (!result.isDone) return null;
+      opts.onEvent?.(`[#${issue.number}] PREFLIGHT — skipping autofix, existing merged PR likely resolved the issue`);
+      return result.reason;
+    } catch (err) {
+      opts.onEvent?.(`[#${issue.number}] PREFLIGHT — merged-PR verification failed, continuing (${(err as Error).message})`);
+      return null;
+    }
   }
 
   private async runOneAttempt(args: {
@@ -792,4 +850,3 @@ ${reviewIssues}
 ${concerns}
 `;
 }
-

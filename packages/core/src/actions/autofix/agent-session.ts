@@ -219,17 +219,63 @@ function isBashCommandAllowed(cmd: string, allowlist: string[]): boolean {
   });
 }
 
-function parseStructured<T>(raw: string, schema: z.ZodSchema<T>): T | null {
+export function parseStructured<T>(raw: string, schema: z.ZodSchema<T>): T | null {
   const cleaned = raw.replace(/^```json?\s*\n?/m, '').replace(/\n?```\s*$/m, '').trim();
   try {
     return schema.parse(JSON.parse(cleaned));
   } catch {
-    const match = raw.match(/\{[\s\S]*\}/);
-    if (!match) return null;
-    try {
-      return schema.parse(JSON.parse(match[0]));
-    } catch {
-      return null;
+    for (const candidate of extractJsonObjectCandidates(raw)) {
+      try {
+        return schema.parse(JSON.parse(candidate));
+      } catch {
+        continue;
+      }
+    }
+    return null;
+  }
+}
+
+function extractJsonObjectCandidates(raw: string): string[] {
+  const candidates: string[] = [];
+  let start = -1;
+  let depth = 0;
+  let inString = false;
+  let escaped = false;
+
+  for (let i = 0; i < raw.length; i += 1) {
+    const ch = raw[i];
+
+    if (inString) {
+      if (escaped) {
+        escaped = false;
+      } else if (ch === '\\') {
+        escaped = true;
+      } else if (ch === '"') {
+        inString = false;
+      }
+      continue;
+    }
+
+    if (ch === '"') {
+      inString = true;
+      continue;
+    }
+
+    if (ch === '{') {
+      if (depth === 0) start = i;
+      depth += 1;
+      continue;
+    }
+
+    if (ch === '}') {
+      if (depth === 0) continue;
+      depth -= 1;
+      if (depth === 0 && start >= 0) {
+        candidates.push(raw.slice(start, i + 1));
+        start = -1;
+      }
     }
   }
+
+  return candidates;
 }
