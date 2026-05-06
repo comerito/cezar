@@ -5,9 +5,19 @@ import { GitHubService } from '../../services/github.service.js';
 import { chunkArray } from '../../utils/chunker.js';
 import { buildDoneDetectorPrompt, DoneDetectorResponseSchema, type IssueWithPRs } from './prompt.js';
 
+export type DoneDetectorProgressStage = 'fetch' | 'analyze';
+
+export interface DoneDetectorProgress {
+  stage: DoneDetectorProgressStage;
+  current: number;
+  total: number;
+  message?: string;
+}
+
 export interface DoneDetectorOptions {
   recheck?: boolean;
   dryRun?: boolean;
+  onProgress?: (p: DoneDetectorProgress) => void;
 }
 
 export interface DoneIssueResult {
@@ -72,8 +82,11 @@ export class DoneDetectorRunner {
 
     // Phase 1: Fetch timelines from GitHub
     const github = this.githubService ?? new GitHubService(this.config);
+    const onProgress = options.onProgress;
 
     const issuesWithPRs: IssueWithPRs[] = [];
+
+    onProgress?.({ stage: 'fetch', current: 0, total: candidates.length, message: `Fetching timelines for ${candidates.length} issues...` });
 
     for (const [idx, issue] of candidates.entries()) {
       try {
@@ -99,6 +112,8 @@ export class DoneDetectorRunner {
       } catch {
         // Timeline fetch failed — skip this issue silently
         continue;
+      } finally {
+        onProgress?.({ stage: 'fetch', current: idx + 1, total: candidates.length });
       }
     }
 
@@ -117,6 +132,9 @@ export class DoneDetectorRunner {
     const batches = chunkArray(issuesWithPRs, batchSize);
     const allResults: DoneIssueResult[] = [];
 
+    onProgress?.({ stage: 'analyze', current: 0, total: issuesWithPRs.length, message: `Analyzing ${issuesWithPRs.length} issues with merged PRs...` });
+
+    let analyzed = 0;
     for (const [i, batch] of batches.entries()) {
       const prompt = buildDoneDetectorPrompt(batch);
       const parsed = await llm.analyze(prompt, DoneDetectorResponseSchema);
@@ -164,6 +182,9 @@ export class DoneDetectorRunner {
       if (!options.dryRun) {
         await this.store.save();
       }
+
+      analyzed += batch.length;
+      onProgress?.({ stage: 'analyze', current: analyzed, total: issuesWithPRs.length });
     }
 
     // Sort: resolved issues first, by confidence descending

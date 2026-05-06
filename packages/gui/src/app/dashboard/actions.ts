@@ -57,7 +57,7 @@ async function runActionInBackground(
     }
 
     emit('running', `Running ${actionId}...`);
-    await runFn(store, config);
+    await runFn(store, config, emit);
     await store.save();
 
     emit('done', `${actionId} completed`);
@@ -68,7 +68,8 @@ async function runActionInBackground(
   }
 }
 
-type RunFn = (store: IssueStore, config: Config) => Promise<void>;
+type Emit = (stage: string, message: string, current?: number, total?: number) => void;
+type RunFn = (store: IssueStore, config: Config, emit: Emit) => Promise<void>;
 
 const ACTION_RUNNERS: Record<string, RunFn> = {
   duplicates: async (store, config) => {
@@ -103,9 +104,14 @@ const ACTION_RUNNERS: Record<string, RunFn> = {
     const { StaleRunner } = await import('@cezar/core');
     await new StaleRunner(store, config).analyze();
   },
-  'done-detector': async (store, config) => {
+  'done-detector': async (store, config, emit) => {
     const { DoneDetectorRunner } = await import('@cezar/core');
-    await new DoneDetectorRunner(store, config).detect();
+    await new DoneDetectorRunner(store, config).detect({
+      onProgress: (p) => {
+        const label = p.stage === 'fetch' ? 'Fetching timelines' : 'Analyzing with LLM';
+        emit(p.stage, p.message ?? `${label} ${p.current}/${p.total}`, p.current, p.total);
+      },
+    });
   },
   'good-first-issue': async (store, config) => {
     const { GoodFirstIssueRunner } = await import('@cezar/core');
