@@ -155,17 +155,30 @@ The runner long-polls `/api/runner/jobs`, claims jobs whose `required_backend` i
 
 ---
 
-## Step 9 — Phase 6 (not done yet — decide when ready)
+## Step 9 — Phase 6 (partially done — the safe parts; the rest is deferred until live)
 
-Once the new path is proven on your traffic, the remaining cleanup (deliberately left undone — it deletes working code and needs validation first):
+Phase 6 is the cleanup phase, deliberately split: the **safe, additive parts are
+done now** (committed on `feat/agent-cockpit-refactor`); everything that deletes or
+re-wires working code is **deferred until the new path is proven on real traffic**.
 
-- Retire the 6 old cron routes (`issue-sync`, `issue-match`, `issue-fix`, `ci-watch`, `ci-attribute`, `ci-fix`) and the `flows`/`flow_events` tables / `/flows` UI; a migration backfills `flows` → `workflow_runs`.
-- Wire CI-followup persistence from the (now-retired) `ci-fix` path through `execute-workflow-job.ts` / the runner.
-- Dedupe `run-orchestrator.ts` with `execute-workflow-job.ts`.
-- Run the action-deletion list (`docs/audit/02-DELETION-CANDIDATES.md`) — drop the speculative display-only actions or downgrade them to optional triage skills.
-- CLI ↔ core convergence: `.cezar/`-backed equivalents for bindings/runs so the solo CLI path doesn't bit-rot.
-- Smaller `TODO(phase-5)` items: a real `dedupe-check` triage step (needs the open-issue knowledge base), `needs-info` / `ignore` route handling, a triage-driven `human-gate` for below-threshold autofix candidates.
-- README rewrite around the cockpit + skills model.
+### Done in Phase 6
+
+- **`README.md` / `CLAUDE.md`** rewritten around the cockpit + skills + workflow model (this doc is the activation runbook they point to).
+- **`config.experimental`** flag added; the four genuinely-orphaned display-only actions (`issue-check`, `release-notes`, `milestone-planner`, `needs-response`) are **hidden from the CLI hub** unless `experimental: true` — they stay registered (`cezar run <id>` and the GUI are unaffected). Nothing was deleted. (`docs/audit/02-DELETION-CANDIDATES.md` updated with a "partly superseded" note.)
+- **`cezar runs`** CLI command — lists / inspects local workflow-engine runs written to `<store dir>/.cezar/runs/*.json` (the CLI's autofix path mirrors a per-run summary there when `workflow.useEngine` is on). The web cockpit (`/cockpit`) is the SaaS equivalent.
+- The `TODO(phase-3c)` dedupe marker in `execute-workflow-job.ts` was re-pointed to `TODO(phase-6, after live cutover)` (see below).
+
+### Deferred — do after the live cutover
+
+These delete or re-wire code that's still live; validate the new path on your traffic first.
+
+- **Retire the 6 old cron routes** (`issue-sync`, `issue-match`, `issue-fix`, `ci-watch`, `ci-attribute`, `ci-fix`) and the `flows`/`flow_events` tables / the `/flows` UI; add a `0011_*.sql` that backfills `flows` → `workflow_runs`.
+- **CI-followup-via-webhook re-wiring**: implement the `check_run` webhook handler (currently a deliberate no-op) and the `ciFollowupWorkflow.attribute` step properly, then wire CI-followup persistence through `execute-workflow-job.ts` / the runner (replacing the retired `ci-fix` path).
+- **Dedupe `run-orchestrator.ts` ↔ `execute-workflow-job.ts`**: extract the shared `agent_runs`/`agent_run_events`/`workflow_runs` persistence into a `persist-workflow-run.ts` helper; both call it. Deferred so the still-live `flows`-backed `/flows` UI that `run-orchestrator.ts` drives isn't disturbed.
+- **Run the action-deletion list** (`docs/audit/02-DELETION-CANDIDATES.md`) — drop or downgrade the orphaned actions to optional triage skills. (Stale: `bug-detector`/`priority` are now used by `triageWorkflow`; the rest are actively used.)
+- **CLI ↔ core convergence**: full `.cezar/`-backed equivalents for bindings (the `runs` mirror is the first slice) so the solo CLI path doesn't bit-rot.
+- **Smaller `TODO(phase-5)` items**: a real `dedupe-check` triage step (needs the open-issue knowledge base), `needs-info` / `ignore` route handling, a triage-driven `human-gate` for below-threshold autofix candidates.
+- **Codex `phase-4-verify`**: do one live `codex exec --json` run and confirm the structured-output + usage schema in `CodexCliRunner` matches before depending on it.
 
 ---
 

@@ -8,6 +8,7 @@ import { initCommand } from './commands/init.js';
 import { syncCommand } from './commands/sync.js';
 import { statusCommand } from './commands/status.js';
 import { runCommand } from './commands/run.js';
+import { runsCommand } from './commands/runs.js';
 import { launchHub } from './ui/hub.js';
 import { VERSION } from './utils/version.js';
 
@@ -87,6 +88,13 @@ program.command('run <action>')
   .action(async (actionId, opts) => {
     const config = await loadConfig();
     await runCommand(actionId, opts, config);
+  });
+
+program.command('runs [id]')
+  .description('List local workflow-engine runs (or show one in detail). Populated when workflow.useEngine is on; the web cockpit is the SaaS equivalent.')
+  .action(async (id) => {
+    const config = await loadConfig();
+    await runsCommand(id, config);
   });
 
 program.command('pipeline')

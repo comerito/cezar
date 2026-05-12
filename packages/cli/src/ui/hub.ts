@@ -29,7 +29,12 @@ export async function launchHub(store: IssueStore | null, config: Config): Promi
     renderLogo();
     renderStatusBox(store);
 
-    const choices = buildChoices(store);
+    const { choices, hiddenCount } = buildChoices(store, config);
+    if (hiddenCount > 0) {
+      console.log(
+        chalk.dim(`  ${hiddenCount} experimental actions hidden — set \`experimental: true\` in your config to show them.\n`),
+      );
+    }
 
     const selected = await select({
       message: 'What would you like to do?',
@@ -91,8 +96,24 @@ interface SelectChoice {
 
 const GROUP_ORDER: ActionGroup[] = ['triage', 'intelligence', 'release', 'community'];
 
-function buildChoices(store: IssueStore | null): Array<SelectChoice | Separator> {
-  const actions = actionRegistry.getAll();
+// Genuinely-orphaned actions: hidden from the hub unless `config.experimental`.
+// They stay registered (CLI `run <id>` + GUI unaffected) — see Phase 6 / the
+// audit notes. `issue-check` targets issue authors not maintainers; `release-notes`
+// output goes nowhere; `milestone-planner` doesn't apply milestones; `needs-response`
+// is a list with no escalation.
+const EXPERIMENTAL_ACTION_IDS = new Set(['issue-check', 'release-notes', 'milestone-planner', 'needs-response']);
+
+function buildChoices(
+  store: IssueStore | null,
+  config: Config,
+): { choices: Array<SelectChoice | Separator>; hiddenCount: number } {
+  const showExperimental = config.experimental === true;
+  let hiddenCount = 0;
+  const actions = actionRegistry.getAll().filter((a) => {
+    if (showExperimental || !EXPERIMENTAL_ACTION_IDS.has(a.id)) return true;
+    hiddenCount++;
+    return false;
+  });
 
   // Group actions by their group property
   const grouped = new Map<ActionGroup, ActionDefinition[]>();
@@ -130,14 +151,17 @@ function buildChoices(store: IssueStore | null): Array<SelectChoice | Separator>
     }
   }
 
-  return [
-    ...actionChoices,
-    new Separator(),
-    { name: '🚀  Run Full Pipeline', value: 'pipeline' },
-    { name: '🔄  Sync with GitHub', value: 'sync' },
-    new Separator(),
-    { name: '✕   Exit', value: 'exit' },
-  ];
+  return {
+    choices: [
+      ...actionChoices,
+      new Separator(),
+      { name: '🚀  Run Full Pipeline', value: 'pipeline' },
+      { name: '🔄  Sync with GitHub', value: 'sync' },
+      new Separator(),
+      { name: '✕   Exit', value: 'exit' },
+    ],
+    hiddenCount,
+  };
 }
 
 function formatActionChoice(action: ActionDefinition, store: IssueStore | null): string {

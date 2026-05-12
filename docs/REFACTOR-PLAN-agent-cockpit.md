@@ -242,6 +242,8 @@ Every phase is independently shippable; Phases 0–2 merge behind a flag and are
 - Finish CLI ↔ core convergence; ensure `.cezar/` file-backed equivalents exist for bindings/runs so the solo path doesn't bit-rot.
 - Docs: README rewrite around the cockpit + skills model.
 
+> **Implemented conservatively (the `chore: refactor phase 6` commit on `feat/agent-cockpit-refactor`):** docs rewrite (`README.md`/`CLAUDE.md`) + `experimental`-flagging the four orphaned actions (hidden in the CLI hub, *not* deleted) + `cezar runs` (reads `<store dir>/.cezar/runs/*.json`, written by the CLI's engine path). Cron retirement, the CI-followup-via-webhook re-wiring, action deletion, the `flows`→`workflow_runs` backfill migration, the `run-orchestrator.ts`↔`execute-workflow-job.ts` dedup, and the remaining `TODO(phase-5)` items are deferred until the live cutover — see `MIGRATION.md` Step 9 ("Deferred — do after the live cutover").
+
 **Rough total: ~9–10 weeks.** Public cockpit at end of Phase 3; full subscription-CLI + self-hosted-runner story at end of Phase 4; auto-triage at end of Phase 5.
 
 ---

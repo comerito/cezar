@@ -3,9 +3,10 @@ import chalk from 'chalk';
 import type { Config } from '@cezar/core';
 import type { IssueStore } from '@cezar/core';
 import type { StoredIssue } from '@cezar/core';
-import { GitHubService, applyPipelineExclusions, AutofixOrchestrator, type OrchestratorOutcome } from '@cezar/core';
+import { GitHubService, applyPipelineExclusions, AutofixOrchestrator, type OrchestratorOutcome, type AgentRunRecord } from '@cezar/core';
 import type { RootCause } from '@cezar/core';
 import { verboseToggle } from './verbose.js';
+import { runsDir, recordsToSteps, writeRunSummary } from '../../utils/runs-store.js';
 
 export interface AutofixOptions {
   apply?: boolean;
@@ -86,6 +87,15 @@ export class AutofixResults {
   }
 }
 
+function outcomeSummary(o: OrchestratorOutcome): string {
+  switch (o.status) {
+    case 'pr-opened': return `PR opened: ${o.prUrl}`;
+    case 'dry-run': return `dry-run passed (branch: ${o.branch})`;
+    case 'failed': return `failed: ${o.reason}`;
+    case 'skipped': return `skipped: ${o.reason}`;
+  }
+}
+
 export class AutofixRunner {
   private store: IssueStore;
   private config: Config;
@@ -150,16 +160,25 @@ export class AutofixRunner {
       }
     };
 
+    // When the workflow engine is on, mirror each run to `.cezar/runs/` so the
+    // local `cezar runs` command has something to show (the SaaS equivalent is
+    // the web cockpit backed by `workflow_runs`/`agent_runs`).
+    const useEngine = this.config.workflow?.useEngine === true;
+    const localRunsDir = runsDir(this.config.store?.path);
+
     verboseToggle.install(spinner);
     try {
       for (const issue of limited) {
         const stage = `Processing #${issue.number}: ${issue.title}`;
         verboseToggle.setStage(stage);
+        const records: AgentRunRecord[] = [];
+        const startedAt = new Date().toISOString();
         const outcome = await orchestrator.processIssue(issue.number, {
           apply,
           confirmBeforeFix: options.confirmBeforeFix,
           onEvent: emitEvent,
           onAgentEvent: (evt) => { verboseToggle.onAgentEvent(evt); },
+          onRunRecord: useEngine ? (r) => { records.push(r); } : undefined,
         });
         items.push({
           issueNumber: issue.number,
@@ -167,6 +186,22 @@ export class AutofixRunner {
           htmlUrl: issue.htmlUrl,
           outcome,
         });
+        if (useEngine && records.length > 0) {
+          try {
+            await writeRunSummary(localRunsDir, {
+              id: records[0]!.id,
+              workflow: records[0]!.workflow,
+              issueNumber: issue.number,
+              startedAt,
+              finishedAt: new Date().toISOString(),
+              status: outcome.status === 'pr-opened' || outcome.status === 'dry-run' ? 'finished' : outcome.status,
+              steps: recordsToSteps(records),
+              outcome: outcomeSummary(outcome),
+            });
+          } catch {
+            // Best-effort: a failed mirror write must not fail the run.
+          }
+        }
       }
     } finally {
       verboseToggle.uninstall();

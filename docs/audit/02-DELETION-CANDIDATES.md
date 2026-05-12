@@ -1,5 +1,7 @@
 # Deletion / hide candidates — six speculative actions
 
+> **Partly superseded (Phase 6).** The triage workflow (`packages/core/src/workflows/definitions/triage.workflow.ts`) now depends on `bug-detector` and `priority`; `auto-label`/`security`/etc. are still actively used by `triageWorkflow` and the GUI — so the original "delete these six" list is stale. In Phase 6 the four genuinely-orphaned ones (`issue-check`, `release-notes`, `milestone-planner`, `needs-response`) were **hidden behind `config.experimental`** in the CLI hub rather than deleted — they stay registered so `cezar run <id>` and the GUI are unaffected. Full deletion (if ever) is deferred until after the live cutover.
+
 These six actions ship in the registry but produce no GitHub side-effect that a maintainer could not get faster by reading the issue. They inflate the hub menu, the test surface, and the cognitive load on first-time users. Recommend hiding them behind an `experimental` flag in Phase 0 and removing them entirely once a 1-month metric (analytics or self-reported) confirms low usage.
 
 ---

@@ -36,10 +36,10 @@ type AgentRunsRow = Database['public']['Tables']['agent_runs']['Row'];
  * can be killed mid-run. The watchdog (`requeue_stalled_jobs`) re-queues such
  * jobs; the proper long-running runner is Phase 4.
  *
- * TODO(phase-3c): dedupe with run-orchestrator.ts — that file does the same
- * new-tables persistence inline alongside the legacy `flows` writes. Left as-is
- * for now to avoid disturbing the flows-backed UI; this helper is the engine-
- * only path the new cockpit consumes.
+ * TODO(phase-6, after live cutover): dedupe run-orchestrator.ts engine branch
+ * with this helper — extract the shared `agent_runs`/`agent_run_events`/`workflow_runs`
+ * persistence into `persist-workflow-run.ts`. Deferred in Phase 6 to avoid disturbing
+ * the still-live flows-backed `/flows` UI that `run-orchestrator.ts` also drives.
  */
 export async function executeWorkflowJob(
   adminSupabase: SupabaseClient<Database>,

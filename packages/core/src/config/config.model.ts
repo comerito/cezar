@@ -104,6 +104,10 @@ export const ConfigSchema = z.object({
       separateCommentPerStep: z.boolean().default(false),
     }).default({}),
   }).default({}),
+  // Show experimental/orphaned actions in the interactive CLI hub. Off by
+  // default — these actions stay registered (so `cezar run <id>` and the GUI
+  // are unaffected); this only trims the menu (see docs/audit/02-DELETION-CANDIDATES.md).
+  experimental: z.boolean().default(false),
 });
 
 export type Config = z.infer<typeof ConfigSchema>;
