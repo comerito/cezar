@@ -42,6 +42,26 @@ export type IssueAutofixCandidateStatus =
   | 'dispatched'
   | 'resolved';
 
+// ─── Phase 3a: job queue + run/event tables ─────────────────────────────
+// Note: `@cezar/core` also exports a `WorkflowRunStatus` (the in-process engine
+// state). These are the *DB* string sets — kept local + named distinctly to
+// avoid confusing the two.
+export type JobKind = 'triage' | 'autofix' | 'ci-followup';
+export type JobStatus = 'queued' | 'claimed' | 'running' | 'done' | 'failed' | 'cancelled';
+export type DbWorkflowRunStatus = 'queued' | 'running' | 'paused' | 'succeeded' | 'failed' | 'cancelled';
+export type AgentRunStatus = 'running' | 'succeeded' | 'failed' | 'skipped';
+export type AgentRunStepKind = 'agent' | 'effect' | 'human-gate' | 'commit' | 'open-pr' | 'push';
+export type AgentRunEventType =
+  | 'lifecycle'
+  | 'agent-text'
+  | 'tool-call'
+  | 'tool-result'
+  | 'note'
+  | 'step-start'
+  | 'step-end';
+export type RunnerKind = 'cloud' | 'self-hosted';
+export type RunnerStatus = 'online' | 'offline' | 'draining';
+
 export type CiAttributionVerdict = 'ours' | 'unrelated' | 'flaky' | 'unsure';
 export type CiAttributionMethod = 'base-branch-control' | 'llm' | 'degraded';
 
@@ -260,6 +280,181 @@ export interface Database {
           fetched_at?: string;
         };
         Update: Partial<Database['public']['Tables']['repo_skills']['Insert']>;
+      };
+      jobs: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          repo: string | null;
+          kind: JobKind;
+          issue_number: number | null;
+          pr_number: number | null;
+          priority: number;
+          status: JobStatus;
+          required_backend: WorkflowBackend | null;
+          claimed_by_runner: string | null;
+          attempts: number;
+          max_attempts: number;
+          scheduled_at: string;
+          payload: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database['public']['Tables']['jobs']['Row'],
+          'id' | 'priority' | 'status' | 'attempts' | 'max_attempts' | 'scheduled_at' | 'payload' | 'created_at' | 'updated_at'
+        > & {
+          id?: string;
+          repo?: string | null;
+          issue_number?: number | null;
+          pr_number?: number | null;
+          priority?: number;
+          status?: JobStatus;
+          required_backend?: WorkflowBackend | null;
+          claimed_by_runner?: string | null;
+          attempts?: number;
+          max_attempts?: number;
+          scheduled_at?: string;
+          payload?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['jobs']['Insert']>;
+      };
+      workflow_runs: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          job_id: string | null;
+          workflow: string;
+          repo: string | null;
+          issue_number: number | null;
+          pr_number: number | null;
+          branch: string | null;
+          head_sha: string | null;
+          pr_url: string | null;
+          status: DbWorkflowRunStatus;
+          pause_requested: boolean;
+          current_step_id: string | null;
+          outcome: Json | null;
+          reason: string | null;
+          tokens_used: number;
+          cost_estimate: number | null;
+          started_at: string;
+          finished_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database['public']['Tables']['workflow_runs']['Row'],
+          'id' | 'status' | 'pause_requested' | 'tokens_used' | 'started_at' | 'created_at' | 'updated_at'
+        > & {
+          id?: string;
+          job_id?: string | null;
+          repo?: string | null;
+          issue_number?: number | null;
+          pr_number?: number | null;
+          branch?: string | null;
+          head_sha?: string | null;
+          pr_url?: string | null;
+          status?: DbWorkflowRunStatus;
+          pause_requested?: boolean;
+          current_step_id?: string | null;
+          outcome?: Json | null;
+          reason?: string | null;
+          tokens_used?: number;
+          cost_estimate?: number | null;
+          started_at?: string;
+          finished_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['workflow_runs']['Insert']>;
+      };
+      agent_runs: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          workflow_run_id: string;
+          step_id: string;
+          iteration: number;
+          kind: AgentRunStepKind | null;
+          backend: string | null;
+          model: string | null;
+          status: AgentRunStatus;
+          started_at: string;
+          finished_at: string | null;
+          tokens_used: number;
+          cost_estimate: number | null;
+          summary: string | null;
+          error: string | null;
+        };
+        Insert: Omit<
+          Database['public']['Tables']['agent_runs']['Row'],
+          'id' | 'iteration' | 'status' | 'started_at' | 'tokens_used'
+        > & {
+          id?: string;
+          iteration?: number;
+          kind?: AgentRunStepKind | null;
+          backend?: string | null;
+          model?: string | null;
+          status?: AgentRunStatus;
+          started_at?: string;
+          finished_at?: string | null;
+          tokens_used?: number;
+          cost_estimate?: number | null;
+          summary?: string | null;
+          error?: string | null;
+        };
+        Update: Partial<Database['public']['Tables']['agent_runs']['Insert']>;
+      };
+      agent_run_events: {
+        Row: {
+          id: number;
+          workspace_id: string;
+          workflow_run_id: string;
+          agent_run_id: string | null;
+          type: AgentRunEventType;
+          payload: Json;
+          created_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['agent_run_events']['Row'], 'id' | 'payload' | 'created_at'> & {
+          id?: number;
+          agent_run_id?: string | null;
+          payload?: Json;
+          created_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['agent_run_events']['Insert']>;
+      };
+      runners: {
+        Row: {
+          id: string;
+          workspace_id: string | null;
+          name: string;
+          kind: RunnerKind;
+          backends: string[];
+          models: string[];
+          token_hash: string | null;
+          status: RunnerStatus;
+          last_heartbeat_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database['public']['Tables']['runners']['Row'],
+          'id' | 'backends' | 'models' | 'status' | 'created_at' | 'updated_at'
+        > & {
+          id?: string;
+          workspace_id?: string | null;
+          backends?: string[];
+          models?: string[];
+          token_hash?: string | null;
+          status?: RunnerStatus;
+          last_heartbeat_at?: string | null;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['runners']['Insert']>;
       };
     };
   };

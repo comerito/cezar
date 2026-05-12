@@ -169,6 +169,8 @@ New Supabase schema (one migration in Phase 3):
 
 `flows`, `issue_autofix_candidates`, `ci_failed_checks`, `ci_attributions`, `ci_fix_attempts` → backfilled into `jobs`+`agent_runs`; `flows` kept as a **view** over `agent_runs` for one release; old tables dropped after the 6 cron route files are deleted.
 
+> **Implementation note (Phase 3a):** rather than making `flows` a view over `agent_runs`, the migration introduces a dedicated **`workflow_runs`** table — the top-level run (the cockpit row) — that runs *in parallel* with `flows`/`flow_events` during the transition (no view, no backfill yet). `agent_runs.workflow_run_id` references it. A later migration retires `flows`/`flow_events` once the 6 legacy cron routes are gone.
+
 GUI pages:
 - **Cockpit** (new, default landing) — the unified run list. Filters: status, repo, workflow, backend, age. Columns: issue/PR, workflow, current step, backend·model, status, tokens/cost, age. Row actions: **pause · resume · cancel · retry · re-run-from-step · open live view**. Bulk: cancel/retry selection. Empty + per-row error states. Realtime on `agent_runs`; opening a run subscribes to its `agent_run_events`.
 - **Run live view** — evolved `flows/cockpit/[flowId]/cockpit-shell.tsx`: a step-graph, each node showing skill·backend·model, progress, streamed events, the comment section it produced, inline pause/cancel, and any `human-gate` decision card.

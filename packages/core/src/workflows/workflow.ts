@@ -252,6 +252,8 @@ export interface AgentRunRecord {
   id: string;
   workflow: string;
   stepId: string;
+  /** The step's kind (`agent`/`effect`/…) — handy for the cockpit's per-row icon. */
+  kind?: WorkflowStepKind;
   /** Loop iteration (0 = first pass / non-loop step). */
   iteration: number;
   backend: AgentBackend;
@@ -269,7 +271,7 @@ export interface WorkflowRunResult<W> {
   status: WorkflowRunStatus;
   blackboard: W;
   runRecords: AgentRunRecord[];
-  /** Set when `status` is `succeeded`-but-skipped, `failed`, or `paused`. */
+  /** Set when `status` is `succeeded`-but-skipped, `failed`, `paused`, or `cancelled`. */
   reason?: string;
   /** For autofix runs that opened a PR. */
   prUrl?: string;

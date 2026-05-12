@@ -87,6 +87,10 @@ export const ConfigSchema = z.object({
   // today (see docs/REFACTOR-PLAN-agent-cockpit.md §3.5). The full workflow
   // engine lands in Phase 2; today only the autofix orchestrator reads these.
   workflow: z.object({
+    // Phase 3a: when true, `AutofixOrchestrator` delegates to the declarative
+    // workflow engine (`runWorkflow`) instead of its hand-rolled path. Defaults
+    // off ⇒ today's behavior is byte-identical.
+    useEngine: z.boolean().default(false),
     bindings: z.array(z.object({
       stepId: z.string(),
       skillName: z.string().nullable().default(null),

@@ -62,7 +62,14 @@ export async function loadWorkspaceConfig(
 
   // Inject the GUI-configured workflow bindings/settings so a binding actually
   // affects autofix runs (the core orchestrator reads `config.workflow.bindings`).
+  // `useEngine` (Phase 3a) flips the orchestrator onto the declarative workflow
+  // engine — defaults off; settable via the workspace's `config.workflow.useEngine`
+  // JSONB or the CEZAR_USE_WORKFLOW_ENGINE env var (escape hatch for ops).
+  const wWorkflow = (wsConfig.workflow ?? {}) as Record<string, unknown>;
+  const useEngine =
+    process.env.CEZAR_USE_WORKFLOW_ENGINE === 'true' || wWorkflow.useEngine === true;
   baseConfig.workflow = {
+    useEngine,
     bindings: await loadWorkflowBindings(workspaceId, supabase, baseConfig.github.repo || undefined),
     settings: await loadWorkflowSettings(workspaceId, supabase),
   };

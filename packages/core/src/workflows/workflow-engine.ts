@@ -69,8 +69,18 @@ export interface WorkflowRunContext {
   requestHumanDecision?: (prompt: HumanGatePrompt) => Promise<HumanGateDecision | null>;
   /** Pre-discovered repo skills; defaults to discovering from `config.autofix.repoRoot`. */
   skills?: Skill[];
-  /** Set to request a graceful pause between steps (docs §3.4). */
-  pauseRequested?: () => boolean;
+  /**
+   * Set to request a graceful pause between steps (docs §3.4). May be a static
+   * boolean or a (sync/async) probe — the dispatcher passes a function that
+   * re-reads the DB so an out-of-band pause request is honoured mid-run.
+   * A running step is NOT interrupted mid-flight (known limitation, §3.4).
+   */
+  pauseRequested?: boolean | (() => boolean | Promise<boolean>);
+  /**
+   * Set to request cancellation between steps. Same shape/semantics as
+   * `pauseRequested`, but ends the run `cancelled` (with `reason: 'cancelled'`).
+   */
+  cancelRequested?: boolean | (() => boolean | Promise<boolean>);
   /** Per-loop-id `maxIterations` override (workflow defs are static; config drives the cap). */
   loopMaxIterations?: Record<string, number>;
   /** Git ops in the worktree — injectable for tests; defaults to the real `worktree.ts` helpers. */
@@ -323,10 +333,19 @@ export class WorkflowEngine {
     // Engine main loop. We walk `workflow.steps` by index; when a loop body
     // step fails-retriable (or returns goto-loop) we jump the cursor back to
     // the loop's first step and bump the iteration counter.
+    const resolveFlag = async (flag: WorkflowRunContext['pauseRequested']): Promise<boolean> => {
+      if (flag == null) return false;
+      if (typeof flag === 'boolean') return flag;
+      return (await flag()) === true;
+    };
+
     let i = 0;
     const loopIterations = new Map<string, number>();
     while (i < workflow.steps.length) {
-      if (ctx.pauseRequested?.()) {
+      if (await resolveFlag(ctx.cancelRequested)) {
+        return finishRun('cancelled', 'cancelled');
+      }
+      if (await resolveFlag(ctx.pauseRequested)) {
         return finishRun('paused', 'paused — pause requested between steps');
       }
       const step = workflow.steps[i];
@@ -441,7 +460,7 @@ export class WorkflowEngine {
       // Record the step (non-agent steps get a synthetic record too so the
       // cockpit shows every step; agent steps already have theirs).
       if (!record) {
-        record = this.syntheticRecord(workflow.id, step.id, iteration, 'succeeded');
+        record = this.syntheticRecord(workflow.id, step.id, step.kind, iteration, 'succeeded');
       }
       if (outcome.kind === 'skip-run') {
         record.status = 'skipped';
@@ -561,11 +580,12 @@ export class WorkflowEngine {
     };
   }
 
-  private syntheticRecord(workflow: string, stepId: string, iteration: number, status: StepRunStatus): AgentRunRecord {
+  private syntheticRecord(workflow: string, stepId: string, kind: AgentRunRecord['kind'], iteration: number, status: StepRunStatus): AgentRunRecord {
     return {
       id: randomUUID(),
       workflow,
       stepId,
+      kind,
       iteration,
       backend: 'anthropic-api',
       model: '(none)',
@@ -634,6 +654,7 @@ export class WorkflowEngine {
       id: randomUUID(),
       workflow: workflowId,
       stepId: step.id,
+      kind: 'agent',
       iteration,
       backend: resolved.backend,
       model: resolved.model,
