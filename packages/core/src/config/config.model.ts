@@ -70,7 +70,7 @@ export const ConfigSchema = z.object({
     setupCommands: z.array(z.string()).default([]),
     draftPr: z.boolean().default(true),
     prLabels: z.array(z.string()).default(['cezar-autofix']),
-    skillsDir: z.string().default('.cezar/skills'),
+    skillsDir: z.string().default('.ai/skills'),
     models: z.object({
       analyzer: z.string().default('claude-sonnet-4-20250514'),
       fixer: z.string().default('claude-sonnet-4-20250514'),
@@ -80,6 +80,24 @@ export const ConfigSchema = z.object({
       analyzer: z.number().default(15),
       fixer: z.number().default(30),
       reviewer: z.number().default(10),
+    }).default({}),
+  }).default({}),
+  // Optional GUI-equivalent binding block the CLI can supply from
+  // `.issuemanagerrc.json`. Empty ⇒ built-in defaults ⇒ behavior identical to
+  // today (see docs/REFACTOR-PLAN-agent-cockpit.md §3.5). The full workflow
+  // engine lands in Phase 2; today only the autofix orchestrator reads these.
+  workflow: z.object({
+    bindings: z.array(z.object({
+      stepId: z.string(),
+      skillName: z.string().nullable().default(null),
+      backend: z.enum(['anthropic-api', 'claude-cli', 'codex-cli']).nullable().default(null),
+      model: z.string().nullable().default(null),
+      extraTools: z.array(z.string()).default([]),
+    })).default([]),
+    settings: z.object({
+      autoTriageEnabled: z.boolean().default(true),
+      autofixEnabled: z.boolean().default(false),
+      separateCommentPerStep: z.boolean().default(false),
     }).default({}),
   }).default({}),
 });

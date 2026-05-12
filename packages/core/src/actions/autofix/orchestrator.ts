@@ -12,6 +12,15 @@ import { buildDoneDetectorPrompt, DoneDetectorResponseSchema } from '../done-det
 import { ANALYZER_SYSTEM_PROMPT, AnalyzerResultSchema, isNoActionNeeded, buildAnalyzerUserPrompt, type RootCause } from './prompts/analyzer.js';
 import { FIXER_SYSTEM_PROMPT, FixReportSchema, buildFixerUserPrompt, type FixReport } from './prompts/fixer.js';
 import { REVIEWER_SYSTEM_PROMPT, ReviewVerdictSchema, buildReviewerUserPrompt, normalizeVerdict, retryNotesFromVerdict, fallbackVerdictFromProse, type ReviewVerdict } from './prompts/reviewer.js';
+import { discoverSkills, type Skill } from '../../skills/skill-catalog.js';
+import { resolveStepConfig, type WorkflowBinding } from '../../workflows/binding.js';
+import {
+  buildCiFollowupNotes,
+  buildCiFollowupCommitMessage,
+  buildCiFollowupPrComment,
+  buildCommitMessage,
+  buildPrBody,
+} from './messages.js';
 
 export type OrchestratorOutcome =
   | { status: 'pr-opened'; prUrl: string; prNumber: number; branch: string; headSha: string; rootCause: RootCause; verdict: ReviewVerdict }
@@ -99,6 +108,10 @@ export class AutofixOrchestrator {
 
     const issueData = await this.github.getIssueWithComments(issueNumber);
 
+    // Repo-discovered skills (Phase 1a). Discovery failure must never break
+    // autofix — log and continue with no skills (built-in prompts unchanged).
+    const skills = await this.discoverSkillsSafe(repoRoot, cfg.skillsDir, opts, issueNumber);
+
     const preflightSkip = await this.runAlreadyFixedPreflight(issue, opts);
     if (preflightSkip) {
       return { status: 'skipped', reason: preflightSkip };
@@ -166,7 +179,7 @@ export class AutofixOrchestrator {
       let outcome: AttemptOutcome;
       try {
         outcome = await this.runOneAttempt({
-          issueNumber, worktree, budget, retryNotes, cfg, issue, issueData,
+          issueNumber, worktree, budget, retryNotes, cfg, issue, issueData, skills,
           confirmBeforeFix: isFirst ? opts.confirmBeforeFix : undefined,
           onEvent: opts.onEvent,
           onAgentEvent: opts.onAgentEvent,
@@ -300,6 +313,10 @@ export class AutofixOrchestrator {
   }
 
   private async runAlreadyFixedPreflight(issue: StoredIssue, opts: OrchestratorOptions): Promise<string | null> {
+    // TODO(phase-1a): also honor a `verify-in-repo` binding here — skipped for
+    // now because this path uses LLMService.analyze(promptString), not the
+    // system/user split runAgentSession exposes, so appending a skill body isn't
+    // clean. Revisit when verify-in-repo becomes a real workflow step (Phase 2).
     let mergedPRs;
     try {
       mergedPRs = await this.github.getIssueTimeline(issue.number);
@@ -354,16 +371,25 @@ export class AutofixOrchestrator {
     cfg: NonNullable<Config['autofix']>;
     issue: StoredIssue;
     issueData: { issue: { title: string; body: string }; comments: Array<{ author: string; body: string; createdAt: string }> };
+    skills: Skill[];
     confirmBeforeFix?: (rootCause: RootCause, issue: StoredIssue) => Promise<boolean>;
     onEvent?: (event: string) => void;
     onAgentEvent?: (event: AgentEvent) => void;
     apply: boolean;
   }): Promise<AttemptOutcome> {
-    const { issueNumber, worktree, budget, retryNotes, cfg, issue, issueData } = args;
+    const { issueNumber, worktree, budget, retryNotes, cfg, issue, issueData, skills } = args;
+    const bindings = this.config.workflow?.bindings ?? [];
 
     args.onEvent?.(`[#${issueNumber}] ANALYZE — locating root cause`);
+    const analyzerStep = this.resolveStep({
+      stepId: 'root-cause',
+      builtinSystemPrompt: ANALYZER_SYSTEM_PROMPT,
+      builtinModel: cfg.models.analyzer,
+      builtinTools: ['Read', 'Grep', 'Glob', 'Bash'],
+      bindings, skills, onEvent: args.onEvent, issueNumber,
+    });
     const analyzer = await runAgentSession({
-      systemPrompt: ANALYZER_SYSTEM_PROMPT,
+      systemPrompt: analyzerStep.systemPrompt,
       userPrompt: buildAnalyzerUserPrompt({
         issueNumber,
         title: issueData.issue.title,
@@ -379,10 +405,10 @@ export class AutofixOrchestrator {
         priorAttemptNotes: retryNotes,
       }),
       cwd: worktree.path,
-      allowedTools: ['Read', 'Grep', 'Glob', 'Bash'],
+      allowedTools: analyzerStep.allowedTools,
       bashAllowlist: ['git log', 'git diff', 'git show', 'git status'],
       responseSchema: AnalyzerResultSchema,
-      model: cfg.models.analyzer,
+      model: analyzerStep.model,
       maxTurns: cfg.maxTurns.analyzer,
       tokenBudget: budget,
       onEvent: args.onAgentEvent,
@@ -418,8 +444,15 @@ export class AutofixOrchestrator {
     }
 
     args.onEvent?.(`[#${issueNumber}] FIX — implementing change`);
+    const fixStep = this.resolveStep({
+      stepId: 'fix',
+      builtinSystemPrompt: FIXER_SYSTEM_PROMPT,
+      builtinModel: cfg.models.fixer,
+      builtinTools: cfg.allowedTools,
+      bindings, skills, onEvent: args.onEvent, issueNumber,
+    });
     const fixer = await runAgentSession({
-      systemPrompt: FIXER_SYSTEM_PROMPT,
+      systemPrompt: fixStep.systemPrompt,
       userPrompt: buildFixerUserPrompt({
         issueNumber,
         title: issueData.issue.title,
@@ -427,10 +460,10 @@ export class AutofixOrchestrator {
         priorAttemptNotes: retryNotes,
       }),
       cwd: worktree.path,
-      allowedTools: cfg.allowedTools,
+      allowedTools: fixStep.allowedTools,
       bashAllowlist: cfg.bashAllowlist,
       responseSchema: FixReportSchema,
-      model: cfg.models.fixer,
+      model: fixStep.model,
       maxTurns: cfg.maxTurns.fixer,
       tokenBudget: budget,
       onEvent: args.onAgentEvent,
@@ -448,8 +481,15 @@ export class AutofixOrchestrator {
     const diff = await getDiffAgainstBase(worktree.path, cfg.baseBranch);
 
     args.onEvent?.(`[#${issueNumber}] REVIEW — running code review`);
+    const reviewStep = this.resolveStep({
+      stepId: 'review',
+      builtinSystemPrompt: REVIEWER_SYSTEM_PROMPT,
+      builtinModel: cfg.models.reviewer,
+      builtinTools: ['Read', 'Grep', 'Glob'],
+      bindings, skills, onEvent: args.onEvent, issueNumber,
+    });
     const reviewer = await runAgentSession({
-      systemPrompt: REVIEWER_SYSTEM_PROMPT,
+      systemPrompt: reviewStep.systemPrompt,
       userPrompt: buildReviewerUserPrompt({
         issueNumber,
         title: issueData.issue.title,
@@ -459,9 +499,9 @@ export class AutofixOrchestrator {
         baseBranch: cfg.baseBranch,
       }),
       cwd: worktree.path,
-      allowedTools: ['Read', 'Grep', 'Glob'],
+      allowedTools: reviewStep.allowedTools,
       responseSchema: ReviewVerdictSchema,
-      model: cfg.models.reviewer,
+      model: reviewStep.model,
       maxTurns: cfg.maxTurns.reviewer,
       tokenBudget: budget,
       onEvent: args.onAgentEvent,
@@ -697,6 +737,57 @@ export class AutofixOrchestrator {
     return { status: 'pushed', branch: input.branch, headSha: commitSha, verdict, fixReport };
   }
 
+  /**
+   * Discover repo skills, swallowing any failure (missing dir, read error) —
+   * skill discovery is best-effort and must never break an autofix run.
+   */
+  private async discoverSkillsSafe(
+    repoRoot: string,
+    skillsDir: string,
+    opts: OrchestratorOptions,
+    issueNumber: number,
+  ): Promise<Skill[]> {
+    try {
+      return await discoverSkills(repoRoot, skillsDir);
+    } catch (err) {
+      opts.onEvent?.(`[#${issueNumber}] SKILLS — discovery failed, continuing with built-in prompts (${(err as Error).message})`);
+      return [];
+    }
+  }
+
+  /**
+   * Resolve a step's system prompt / model / tools via the binding chain
+   * (docs §3.5). Backend is honored in the resolution but execution stays on
+   * `anthropic-api` until Phase 4 — a non-API binding emits a warning.
+   */
+  private resolveStep(args: {
+    stepId: string;
+    builtinSystemPrompt: string;
+    builtinModel: string;
+    builtinTools: string[];
+    bindings: WorkflowBinding[];
+    skills: Skill[];
+    onEvent?: (event: string) => void;
+    issueNumber: number;
+  }): { systemPrompt: string; model: string; allowedTools: string[] } {
+    const binding = args.bindings.find((b) => b.stepId === args.stepId) ?? null;
+    const resolved = resolveStepConfig({
+      stepId: args.stepId,
+      builtinSystemPrompt: args.builtinSystemPrompt,
+      builtinModel: args.builtinModel,
+      binding,
+      skills: args.skills,
+    });
+    if (resolved.backend !== 'anthropic-api') {
+      args.onEvent?.(`[#${args.issueNumber}] binding requests backend '${resolved.backend}' but multi-backend execution lands in Phase 4 — using anthropic-api`);
+    }
+    return {
+      systemPrompt: resolved.systemPrompt,
+      model: resolved.model,
+      allowedTools: [...args.builtinTools, ...resolved.extraTools],
+    };
+  }
+
   private markRunning(issueNumber: number): void {
     this.store.setAnalysis(issueNumber, {
       autofixStatus: 'running',
@@ -735,118 +826,3 @@ export class AutofixOrchestrator {
   }
 }
 
-function buildCiFollowupNotes(input: CiFollowupInput): string {
-  const parts: string[] = [];
-  parts.push('CI FAILURE CONTEXT — this is a follow-up adjustment. The prior autofix commit caused CI to fail.');
-  parts.push('');
-  parts.push(`Attribution reasoning:\n${input.attribution.reasoning}`);
-  if (input.attribution.suggestedFocus) {
-    parts.push(`\nSuggested focus:\n${input.attribution.suggestedFocus}`);
-  }
-  if (input.failedCheckNames.length > 0) {
-    parts.push(`\nFailing checks to make green: ${input.failedCheckNames.join(', ')}`);
-  }
-  if (input.logTails && input.logTails.length > 0) {
-    parts.push('\nFailing job log tails:');
-    for (const t of input.logTails) {
-      const tail = t.lines.slice(-40).join('\n');
-      parts.push(`\n### ${t.checkName}\n\`\`\`\n${tail}\n\`\`\``);
-    }
-  }
-  parts.push('\nMake the minimum change that turns the failing checks green without breaking the existing fix.');
-  return parts.join('\n');
-}
-
-function buildCiFollowupCommitMessage(input: CiFollowupInput, title: string, report: FixReport): string {
-  return `fix: CI follow-up for ${title} (#${input.issueNumber})
-
-${report.approach}
-
-Attempt ${input.attemptIndex}/${input.attemptMax} — addresses CI failure on PR #${input.prNumber}.
-
-Co-authored-by: cezar-autofix <noreply@cezar>
-`;
-}
-
-function buildCiFollowupPrComment(
-  input: CiFollowupInput,
-  fixReport: FixReport,
-  verdict: Required<ReviewVerdict>,
-): string {
-  const files = fixReport.changedFiles.length > 0
-    ? fixReport.changedFiles.map(f => `- \`${f}\``).join('\n')
-    : '_(none reported)_';
-  const tests = fixReport.testCommandsRun.length > 0
-    ? fixReport.testCommandsRun.map(c => `- \`${c}\``).join('\n')
-    : '_(none)_';
-  const focus = input.attribution.suggestedFocus ? `\n**Focus:** ${input.attribution.suggestedFocus}` : '';
-  return `## 🤖 Cezar CI follow-up (attempt ${input.attemptIndex}/${input.attemptMax})
-
-Cezar re-ran against the failing CI and pushed an adjustment.${focus}
-
-**Targeted failing checks:** ${input.failedCheckNames.join(', ') || '_(none listed)_'}
-
-**Approach:** ${fixReport.approach}
-
-**Files changed:**
-${files}
-
-**Verification:**
-${tests}
-
-**Automated review:** \`${verdict.verdict}\`
-${verdict.summary}
-
-A human reviewer should still confirm correctness before merge.`;
-}
-
-function buildCommitMessage(issueNumber: number, title: string, report: FixReport): string {
-  return `fix: ${title} (#${issueNumber})
-
-${report.approach}
-
-Fixes #${issueNumber}
-
-Co-authored-by: cezar-autofix <noreply@cezar>
-`;
-}
-
-function buildPrBody(issueNumber: number, rootCause: RootCause, fixReport: FixReport, verdict: Required<ReviewVerdict>): string {
-  const concerns = (fixReport.remainingConcerns ?? []).map(c => `- ${c}`).join('\n') || '_(none)_';
-  const reviewIssues = verdict.issues.length === 0
-    ? '_(no issues raised)_'
-    : verdict.issues.map(i => `- **${i.severity}** ${i.file ? `\`${i.file}\`${i.line ? `:${i.line}` : ''}` : ''}: ${i.comment}`).join('\n');
-
-  return `## Automated fix for #${issueNumber}
-
-Fixes #${issueNumber}
-
-> This PR was opened by [cezar](https://github.com/comerito/cezar) autofix. It is a **draft** — a human reviewer must verify correctness before it merges.
-
-### Root cause
-${rootCause.summary}
-
-${rootCause.hypothesis}
-
-### Approach
-${fixReport.approach}
-
-### Files changed
-${fixReport.changedFiles.map(f => `- \`${f}\``).join('\n') || '_(none)_'}
-
-### Verification
-Commands run by the fixer:
-${fixReport.testCommandsRun.map(c => `- \`${c}\``).join('\n') || '_(none)_'}
-
-### Review (automated)
-**Verdict:** \`${verdict.verdict}\`
-
-${verdict.summary}
-
-Issues raised:
-${reviewIssues}
-
-### Remaining concerns
-${concerns}
-`;
-}

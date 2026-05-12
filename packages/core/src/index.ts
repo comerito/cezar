@@ -40,6 +40,8 @@ export {
   DuplicateResponseSchema,
   type DuplicateMatch,
 } from './services/llm.service.js';
+// GitHub App helper (Phase 1, §3.9) — additive; OAuth login flow untouched.
+export { GitHubAppService } from './services/github-app.service.js';
 export {
   formatAuditComment,
   withAuditFooter,
@@ -107,6 +109,25 @@ export * from './actions/security/prompt.js';
 export * from './actions/stale/runner.js';
 export * from './actions/stale/prompt.js';
 
+// Agent runner abstraction (Phase 0). `AgentEvent` here is the legacy
+// `event.port.ts` shape (kept for the CLI/GUI); the normalized runner event
+// is re-exported below as `RunnerAgentEvent` to avoid the name clash.
+export type {
+  AgentRunner,
+  AgentBackend,
+  AgentRunSpec,
+  AgentRunResult,
+  AgentToolCallRecord,
+  AgentEvent as RunnerAgentEvent,
+} from './agents/agent-runner.js';
+export { isBashCommandAllowed, extractBashCommand } from './agents/agent-runner.js';
+// `parseStructured` is already exported via `actions/autofix/agent-session.js`.
+export { costWeightedTokens } from './agents/structured-output.js';
+export { AnthropicApiRunner } from './agents/anthropic-api-runner.js';
+export { ClaudeCodeCliRunner, type SpawnFn } from './agents/claude-cli-runner.js';
+export { CodexCliRunner } from './agents/codex-cli-runner.js';
+export { createAgentRunner, DEFAULT_AGENT_BACKEND, type CreateAgentRunnerOptions } from './agents/runner-factory.js';
+
 // Autofix internals (orchestrator + agent session). The CLI still owns the
 // terminal-facing AutofixRunner + verbose toggle.
 export * from './actions/autofix/orchestrator.js';
@@ -114,10 +135,80 @@ export * from './actions/autofix/agent-session.js';
 export * from './actions/autofix/token-budget.js';
 export * from './actions/autofix/worktree.js';
 export * from './actions/autofix/skills.js';
+export * from './actions/autofix/messages.js';
 export * from './actions/autofix/prompts/analyzer.js';
 export * from './actions/autofix/prompts/fixer.js';
 export * from './actions/autofix/prompts/reviewer.js';
 export * from './actions/autofix/ci-attribution.js';
+
+// Skills (Phase 1a) — repo-discovered `.ai/skills/**/*.md` catalog.
+export {
+  discoverSkills,
+  skillsForStage,
+  type Skill,
+} from './skills/skill-catalog.js';
+
+// Workflow bindings (Phase 1a) — the binding model + resolution chain.
+export {
+  resolveStepConfig,
+  AUTOFIX_STEP_IDS,
+  BUILTIN_TRIAGE_STEP_IDS,
+  DEFAULT_WORKSPACE_WORKFLOW_SETTINGS,
+  type WorkflowBinding,
+  type WorkflowStepId,
+  type WorkspaceWorkflowSettings,
+  type ResolvedStepConfig,
+} from './workflows/binding.js';
+
+// Declarative workflow engine (Phase 2) — lands alongside `AutofixOrchestrator`;
+// the cutover (orchestrator → thin adapter) is Phase 3.
+export {
+  WorkflowEngine,
+  runWorkflow,
+  type WorkflowRunContext,
+  type WorkflowGitHub,
+} from './workflows/workflow-engine.js';
+export {
+  agentStep,
+  type Workflow,
+  type WorkflowStep,
+  type WorkflowStepKind,
+  type WorkflowStepContext,
+  type WorkflowRunStatus,
+  type StepRunStatus,
+  type StepOutcome,
+  type AgentRunRecord,
+  type WorkflowRunResult,
+  type WorkflowLoop,
+  type WorkflowEffectDeps,
+  type AgentStepDef,
+  type EffectStepDef,
+  type HumanGateStepDef,
+  type CommitStepDef,
+  type OpenPrStepDef,
+  type PushStepDef,
+  type HumanGatePrompt,
+  type HumanGateDecision,
+  type CommentSection,
+  type CommentTarget,
+} from './workflows/workflow.js';
+export {
+  autofixWorkflow,
+  VerifyInRepoSchema,
+  type AutofixBlackboard,
+  type VerifyInRepo,
+} from './workflows/definitions/autofix.workflow.js';
+export {
+  ciFollowupWorkflow,
+  type CiFollowupBlackboard,
+  type CiFollowupSeed,
+} from './workflows/definitions/ci-followup.workflow.js';
+export {
+  triageWorkflow,
+  RouteDecisionSchema,
+  type TriageBlackboard,
+  type RouteDecision,
+} from './workflows/definitions/triage.workflow.js';
 
 // Pipeline
 export * from './pipeline/index.js';

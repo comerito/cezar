@@ -32,6 +32,8 @@ export interface CiFailedCheck {
 
 export type IssueAutofixMode = 'off' | 'notify' | 'autonomous';
 
+export type WorkflowBackend = 'anthropic-api' | 'claude-cli' | 'codex-cli';
+
 export type IssueAutofixCandidateStatus =
   | 'pending_match'
   | 'matched_to_pr'
@@ -68,6 +70,9 @@ export interface Database {
           config: Json;
           meta: Json;
           issue_autofix_mode: IssueAutofixMode;
+          auto_triage_enabled: boolean;
+          autofix_enabled: boolean;
+          separate_comment_per_step: boolean;
           created_at: string;
           updated_at: string;
         };
@@ -215,6 +220,46 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database['public']['Tables']['user_github_tokens']['Insert']>;
+      };
+      workflow_bindings: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          repo: string | null;
+          step_id: string;
+          skill_name: string | null;
+          backend: WorkflowBackend | null;
+          model: string | null;
+          extra_tools: Json;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['workflow_bindings']['Row'], 'id' | 'extra_tools' | 'created_at' | 'updated_at'> & {
+          id?: string;
+          repo?: string | null;
+          skill_name?: string | null;
+          backend?: WorkflowBackend | null;
+          model?: string | null;
+          extra_tools?: Json;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['workflow_bindings']['Insert']>;
+      };
+      repo_skills: {
+        Row: {
+          workspace_id: string;
+          repo: string;
+          commit_sha: string | null;
+          skills: Json;
+          fetched_at: string;
+        };
+        Insert: Omit<Database['public']['Tables']['repo_skills']['Row'], 'commit_sha' | 'skills' | 'fetched_at'> & {
+          commit_sha?: string | null;
+          skills?: Json;
+          fetched_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['repo_skills']['Insert']>;
       };
     };
   };

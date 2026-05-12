@@ -249,12 +249,28 @@ export class GitHubService {
     }
   }
 
-  async addComment(issueNumber: number, body: string): Promise<void> {
+  async addComment(issueNumber: number, body: string): Promise<number> {
     try {
-      await this.octokit.rest.issues.createComment({
+      const resp = await this.octokit.rest.issues.createComment({
         owner: this.owner,
         repo: this.repo,
         issue_number: issueNumber,
+        body,
+      });
+      return resp.data.id;
+    } catch (error) {
+      this.handleError(error);
+      throw error;
+    }
+  }
+
+  /** Edit an existing issue/PR comment in place — the "living comment" per run (docs §3.6). */
+  async updateComment(commentId: number, body: string): Promise<void> {
+    try {
+      await this.octokit.rest.issues.updateComment({
+        owner: this.owner,
+        repo: this.repo,
+        comment_id: commentId,
         body,
       });
     } catch (error) {

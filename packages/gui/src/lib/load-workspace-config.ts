@@ -1,6 +1,7 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
 import type { Config } from '@cezar/core';
 import type { Database } from './supabase/types';
+import { loadWorkflowBindings, loadWorkflowSettings } from './workflow-config';
 
 /**
  * Loads a merged config: cosmiconfig defaults + workspace JSONB overrides.
@@ -58,6 +59,13 @@ export async function loadWorkspaceConfig(
       Object.assign(baseConfig.autofix.maxTurns, maxTurns);
     }
   }
+
+  // Inject the GUI-configured workflow bindings/settings so a binding actually
+  // affects autofix runs (the core orchestrator reads `config.workflow.bindings`).
+  baseConfig.workflow = {
+    bindings: await loadWorkflowBindings(workspaceId, supabase, baseConfig.github.repo || undefined),
+    settings: await loadWorkflowSettings(workspaceId, supabase),
+  };
 
   return baseConfig;
 }
