@@ -101,6 +101,16 @@ export default async function SettingsPage() {
         </section>
 
         <section>
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">Runners</h2>
+          <Link
+            href="/settings/runners"
+            className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm text-fg-muted transition-colors hover:border-accent hover:text-fg"
+          >
+            Register self-hosted agent runners (claude-cli / codex-cli) →
+          </Link>
+        </section>
+
+        <section>
           <h2 className="mb-4 text-lg font-semibold tracking-tight">Team</h2>
           <TeamSection members={members} isAdmin={isAdmin} currentUserId={user.id} />
         </section>

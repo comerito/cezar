@@ -118,6 +118,18 @@ __metadata:
   languageName: unknown
   linkType: soft
 
+"@cezar/runner@workspace:packages/runner":
+  version: 0.0.0-use.local
+  resolution: "@cezar/runner@workspace:packages/runner"
+  dependencies:
+    "@cezar/core": "workspace:*"
+    "@types/node": "npm:^20.0.0"
+    typescript: "npm:^5.4.0"
+  bin:
+    cezar-runner: ./dist/cli.js
+  languageName: unknown
+  linkType: soft
+
 "@colors/colors@npm:1.5.0":
   version: 1.5.0
   resolution: "@colors/colors@npm:1.5.0"

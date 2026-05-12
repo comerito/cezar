@@ -11,6 +11,10 @@ export interface CreateAgentRunnerOptions {
   spawnFn?: SpawnFn;
   /** Override the CLI binary name/path (defaults: `claude` / `codex`). */
   bin?: string;
+  /** Wall-clock timeout for a CLI run (ms); per-spec `timeoutMs` still wins. */
+  timeoutMs?: number;
+  /** $/Mtoken used to derive `claude --max-budget-usd` from `spec.tokenBudget`. */
+  usdPerMillionTokens?: number;
 }
 
 export const DEFAULT_AGENT_BACKEND: AgentBackend = 'anthropic-api';
@@ -27,9 +31,14 @@ export function createAgentRunner(
     case 'anthropic-api':
       return new AnthropicApiRunner();
     case 'claude-cli':
-      return new ClaudeCodeCliRunner({ spawnFn: opts.spawnFn, bin: opts.bin });
+      return new ClaudeCodeCliRunner({
+        spawnFn: opts.spawnFn,
+        bin: opts.bin,
+        timeoutMs: opts.timeoutMs,
+        usdPerMillionTokens: opts.usdPerMillionTokens,
+      });
     case 'codex-cli':
-      return new CodexCliRunner({ spawnFn: opts.spawnFn, bin: opts.bin });
+      return new CodexCliRunner({ spawnFn: opts.spawnFn, bin: opts.bin, timeoutMs: opts.timeoutMs });
     default: {
       const exhaustive: never = backend;
       throw new Error(`Unknown agent backend: ${String(exhaustive)}`);

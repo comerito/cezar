@@ -1,5 +1,5 @@
 import { EventEmitter } from 'node:events';
-import { Readable } from 'node:stream';
+import { PassThrough, Readable } from 'node:stream';
 import type { ChildProcessWithoutNullStreams } from 'node:child_process';
 import type { SpawnFn } from '../../src/agents/claude-cli-runner.js';
 
@@ -12,13 +12,19 @@ export interface FakeSpawnRecord {
 /**
  * Build a fake `spawnFn` that feeds a canned set of stdout lines (NDJSON) to
  * the runner, then exits with `exitCode`. Records every spawn for assertions.
- * Pass `error` to simulate `ENOENT` (binary not found) etc.
+ *
+ * - `error` → simulate `ENOENT` (binary not found) etc.
+ * - `neverExits` → keep stdout open forever and never emit `exit`/`close`
+ *   *until* the runner calls `child.kill()` (which then emits exit/close,
+ *   modelling SIGTERM/SIGKILL actually reaping the process). Used to exercise
+ *   the wall-clock timeout path.
  */
 export function makeFakeSpawn(opts: {
   stdoutLines?: string[];
   stderr?: string;
   exitCode?: number;
   error?: NodeJS.ErrnoException;
+  neverExits?: boolean;
 }): { spawnFn: SpawnFn; calls: FakeSpawnRecord[] } {
   const calls: FakeSpawnRecord[] = [];
 
@@ -35,9 +41,19 @@ export function makeFakeSpawn(opts: {
     };
 
     const lines = opts.stdoutLines ?? [];
-    child.stdout = Readable.from((async function* () {
-      for (const l of lines) yield `${l}\n`;
-    })());
+
+    if (opts.neverExits) {
+      // A stream that emits the canned lines (if any) then stays open.
+      const pt = new PassThrough();
+      child.stdout = pt;
+      for (const l of lines) pt.write(`${l}\n`);
+      // intentionally never `pt.end()`
+    } else {
+      child.stdout = Readable.from((async function* () {
+        for (const l of lines) yield `${l}\n`;
+      })());
+    }
+
     child.stderr = Readable.from((async function* () {
       if (opts.stderr) yield opts.stderr;
     })());
@@ -46,6 +62,12 @@ export function makeFakeSpawn(opts: {
     child.killed = false;
     child.kill = (_signal?: NodeJS.Signals | number) => {
       child.killed = true;
+      // Model the signal actually reaping the process.
+      setImmediate(() => {
+        if (child.exitCode == null) child.exitCode = null;
+        child.emit('exit', null, _signal ?? 'SIGTERM');
+        child.emit('close', null, _signal ?? 'SIGTERM');
+      });
       return true;
     };
 
@@ -55,15 +77,17 @@ export function makeFakeSpawn(opts: {
       return child as unknown as ChildProcessWithoutNullStreams;
     }
 
-    // Emit close once stdout has been fully consumed by the runner.
-    child.stdout.on('end', () => {
-      setImmediate(() => {
-        const code = opts.exitCode ?? 0;
-        child.exitCode = code;
-        child.emit('exit', code, null);
-        child.emit('close', code, null);
+    if (!opts.neverExits) {
+      // Emit close once stdout has been fully consumed by the runner.
+      child.stdout.on('end', () => {
+        setImmediate(() => {
+          const code = opts.exitCode ?? 0;
+          child.exitCode = code;
+          child.emit('exit', code, null);
+          child.emit('close', code, null);
+        });
       });
-    });
+    }
 
     return child as unknown as ChildProcessWithoutNullStreams;
   };

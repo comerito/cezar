@@ -29,6 +29,22 @@ export class IssueStore {
     return new IssueStore(data, '', port);
   }
 
+  /**
+   * Build an IssueStore from already-loaded in-memory data (no file, no port) —
+   * used by the runner (`packages/runner`), which receives the store snapshot
+   * over HTTP and has no Supabase/file of its own. `save()` calls `opts.onSave`
+   * with the current data if provided, else is a no-op. Validates via Zod.
+   */
+  static fromData(data: Store, opts?: { onSave?: (data: Store) => Promise<void> }): IssueStore {
+    const parsed = StoreSchema.parse(data);
+    const onSave = opts?.onSave;
+    const port: StorePort = {
+      load: async () => parsed,
+      save: async (d) => { if (onSave) await onSave(d); },
+    };
+    return new IssueStore(parsed, '', port);
+  }
+
   static async init(storePath: string, meta: { owner: string; repo: string }): Promise<IssueStore> {
     const filePath = join(storePath, 'store.json');
     const data: Store = {

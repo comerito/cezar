@@ -15,6 +15,11 @@ const DISPATCH_BATCH = Number(process.env.CEZAR_DISPATCH_BATCH) || 3;
 // How stale a 'claimed'/'running' job must be before the watchdog re-queues it.
 const STALE_MINUTES = Number(process.env.CEZAR_DISPATCH_STALE_MINUTES) || 15;
 
+// How stale a self-hosted runner's heartbeat must be before we mark it offline
+// and re-queue the jobs it was holding (Phase 4a). Runners heartbeat ~every
+// 10s, so 3min is a generous "it's dead" threshold.
+const OFFLINE_RUNNER_MINUTES = Number(process.env.CEZAR_RUNNER_OFFLINE_MINUTES) || 3;
+
 type JobRow = Database['public']['Tables']['jobs']['Row'];
 
 /**
@@ -45,6 +50,14 @@ export async function GET(req: Request) {
     const { data, error } = await supabase.rpc('requeue_stalled_jobs', { p_stale_minutes: STALE_MINUTES });
     if (error) console.error('[dispatch] requeue_stalled_jobs failed:', error.message);
     else requeued = typeof data === 'number' ? data : 0;
+  }
+  // Phase 4a — also re-queue jobs orphaned by a dead self-hosted runner (and
+  // mark those runners offline). `claim_next_job` now only returns cron-eligible
+  // jobs (required_backend null/anthropic-api) — see migration 0010.
+  {
+    const { data, error } = await supabase.rpc('requeue_jobs_for_offline_runners', { p_stale_minutes: OFFLINE_RUNNER_MINUTES });
+    if (error) console.error('[dispatch] requeue_jobs_for_offline_runners failed:', error.message);
+    else requeued += typeof data === 'number' ? data : 0;
   }
 
   // ── claim ──

@@ -27,6 +27,8 @@ export interface AgentRunSpec<T = unknown> {
   /** Resolved via the binding chain (§3.5); omit to use the backend default. */
   model?: string;
   maxTurns?: number;
+  /** Wall-clock kill switch for the run (ms). Overrides the runner default. */
+  timeoutMs?: number;
   /** Best-effort circuit breaker. CLIs report usage less granularly. */
   tokenBudget?: TokenBudget;
   /** Structured-output contract owned by the step; runners extract+validate. */

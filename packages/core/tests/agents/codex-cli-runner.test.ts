@@ -72,6 +72,75 @@ describe('CodexCliRunner', () => {
     expect(argv.at(-1)).toContain('Find the root cause of #42.');
   });
 
+  it('emits a one-time "no per-tool allowlist" note at the start of a run', async () => {
+    const { spawnFn } = makeFakeSpawn({
+      stdoutLines: [JSON.stringify({ id: '0', msg: { type: 'task_complete' } })],
+      exitCode: 0,
+    });
+    const runner = new CodexCliRunner({ spawnFn });
+    const events: { type: string; message?: string }[] = [];
+    await runner.run(
+      { systemPrompt: 's', userPrompt: 'u', cwd: '/tmp', allowedTools: ['Bash'], bashAllowlist: ['npm test'] },
+      (e) => events.push(e as { type: string; message?: string }),
+    );
+    const notes = events.filter((e) => e.type === 'note' && (e.message ?? '').includes('no per-tool allowlist'));
+    expect(notes).toHaveLength(1);
+  });
+
+  it('times out a never-exiting subprocess: kills it and resolves with note + error', async () => {
+    const { spawnFn } = makeFakeSpawn({
+      stdoutLines: [JSON.stringify({ id: '0', msg: { type: 'task_started' } })],
+      neverExits: true,
+    });
+    const runner = new CodexCliRunner({ spawnFn, timeoutMs: 30 });
+    const events: { type: string; message?: string }[] = [];
+    const res = await runner.run(
+      { systemPrompt: 's', userPrompt: 'u', cwd: '/tmp', allowedTools: ['Bash'] },
+      (e) => events.push(e as { type: string; message?: string }),
+    );
+    expect(events.some((e) => e.type === 'note' && (e.message ?? '').includes('timed out'))).toBe(true);
+    expect(events.some((e) => e.type === 'error' && (e.message ?? '').includes('timed out'))).toBe(true);
+    expect(res.budgetExceeded).toBe(false);
+  });
+
+  it('emits a "token usage not reported" note when no token_count event arrived', async () => {
+    const { spawnFn } = makeFakeSpawn({
+      stdoutLines: [
+        JSON.stringify({ id: '0', msg: { type: 'task_started' } }),
+        JSON.stringify({ id: '1', msg: { type: 'agent_message', message: 'all done' } }),
+        JSON.stringify({ id: '2', msg: { type: 'task_complete' } }),
+      ],
+      exitCode: 0,
+    });
+    const runner = new CodexCliRunner({ spawnFn });
+    const events: { type: string; message?: string }[] = [];
+    const res = await runner.run(
+      { systemPrompt: 's', userPrompt: 'u', cwd: '/tmp', allowedTools: ['Bash'] },
+      (e) => events.push(e as { type: string; message?: string }),
+    );
+    expect(res.tokensUsed).toBe(0);
+    expect(events.some((e) => e.type === 'note' && (e.message ?? '').includes('token usage not reported'))).toBe(true);
+  });
+
+  it('skips a malformed stream line with a note instead of crashing', async () => {
+    const { spawnFn } = makeFakeSpawn({
+      stdoutLines: [
+        '<<< not json >>>',
+        JSON.stringify({ id: '1', msg: { type: 'agent_message', message: '{"ok":true}' } }),
+        JSON.stringify({ id: '2', msg: { type: 'task_complete' } }),
+      ],
+      exitCode: 0,
+    });
+    const runner = new CodexCliRunner({ spawnFn });
+    const events: { type: string; message?: string }[] = [];
+    const res = await runner.run(
+      { systemPrompt: 's', userPrompt: 'u', cwd: '/tmp', allowedTools: ['Bash'], responseSchema: z.object({ ok: z.boolean() }) },
+      (e) => events.push(e as { type: string; message?: string }),
+    );
+    expect(res.parsed).toEqual({ ok: true });
+    expect(events.some((e) => e.type === 'note' && (e.message ?? '').includes('unparseable'))).toBe(true);
+  });
+
   it('throws a clear error when the codex binary is missing', async () => {
     const enoent: NodeJS.ErrnoException = Object.assign(new Error('spawn codex ENOENT'), { code: 'ENOENT' });
     const { spawnFn } = makeFakeSpawn({ error: enoent });

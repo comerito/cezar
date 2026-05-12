@@ -8,12 +8,14 @@ import {
   type AgentToolCallRecord,
 } from './agent-runner.js';
 import { parseStructured } from './structured-output.js';
-import type { SpawnFn } from './claude-cli-runner.js';
+import { DEFAULT_RUN_TIMEOUT_MS, KILL_GRACE_MS, type SpawnFn } from './claude-cli-runner.js';
 
 export interface CodexCliRunnerOptions {
   /** Override the binary name/path; defaults to `codex` on PATH. */
   bin?: string;
   spawnFn?: SpawnFn;
+  /** Wall-clock timeout for a run (ms); per-spec `timeoutMs` still wins. */
+  timeoutMs?: number;
 }
 
 /**
@@ -23,25 +25,27 @@ export interface CodexCliRunnerOptions {
  * HIGHEST-RISK BACKEND. Codex's headless + structured-output story is the
  * least mature of the three: the `--json` event schema is less documented than
  * Claude's stream-json, `--output-schema` enforcement is newish, and there is
- * no per-tool allowlist hook — sandboxing is the coarse `-s <mode>` plus a
- * worktree-only `--cd`. The Phase 0 gate explicitly allows shipping without
- * this backend (escape hatch) if live verification fails.
+ * no per-tool allowlist hook — sandboxing is the coarse `-s workspace-write`
+ * plus a worktree-only `--cd`. (`spec.allowedTools` / `spec.bashAllowlist`
+ * therefore can't be enforced for this backend; we emit a one-time `note`.)
  *
- * TODO(phase-0): every flag and event-type name below is derived from
+ * TODO(phase-4-verify): every flag and event-type name below is derived from
  * `codex exec --help` (v0.128) + the documented `codex exec --json` interface,
- * NOT from a live transcript. Re-verify against a real run in Phase 4 — in
- * particular the event envelope shape and which event carries token usage.
+ * NOT from a live transcript — re-verify against a real run (the event envelope
+ * shape and which event carries token usage in particular).
  */
 export class CodexCliRunner implements AgentRunner {
   readonly backend = 'codex-cli' as const;
 
   private readonly bin: string;
   private readonly spawnFn: SpawnFn;
+  private readonly timeoutMs: number;
   private child: ChildProcessWithoutNullStreams | null = null;
 
   constructor(opts: CodexCliRunnerOptions = {}) {
     this.bin = opts.bin ?? 'codex';
     this.spawnFn = opts.spawnFn ?? (nodeSpawn as unknown as SpawnFn);
+    this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
   }
 
   async run<T = unknown>(
@@ -49,6 +53,12 @@ export class CodexCliRunner implements AgentRunner {
     onEvent?: (event: AgentEvent) => void,
   ): Promise<AgentRunResult<T>> {
     const args = buildCodexArgs(spec);
+
+    // Codex has no per-tool allowlist; make the (coarser) sandbox visible.
+    onEvent?.({
+      type: 'note',
+      message: 'codex backend has no per-tool allowlist — sandbox = workspace-write within the worktree',
+    });
 
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -61,6 +71,7 @@ export class CodexCliRunner implements AgentRunner {
     const toolCalls: AgentToolCallRecord[] = [];
     const textChunks: string[] = [];
     let tokensUsed = 0;
+    let sawUsage = false;
     let budgetExceeded = false;
     let spawnFailed: Error | null = null;
 
@@ -72,18 +83,40 @@ export class CodexCliRunner implements AgentRunner {
     child.stderr.setEncoding('utf8');
     child.stderr.on('data', (chunk: string) => stderrChunks.push(chunk));
 
+    const limitMs = spec.timeoutMs ?? this.timeoutMs;
+    let timedOut = false;
+    let killTimer: NodeJS.Timeout | undefined;
+    const deadline = setTimeout(() => {
+      timedOut = true;
+      void this.interrupt();
+      child.stdout.destroy();
+      killTimer = setTimeout(() => {
+        if (child.exitCode == null && !child.killed) child.kill('SIGKILL');
+      }, KILL_GRACE_MS);
+      if (typeof killTimer.unref === 'function') killTimer.unref();
+    }, limitMs);
+    if (typeof deadline.unref === 'function') deadline.unref();
+
     try {
       for await (const line of readNdjson(child.stdout)) {
+        if (timedOut) break;
         let evt: CodexEvent;
         try {
           evt = JSON.parse(line) as CodexEvent;
         } catch {
-          onEvent?.({ type: 'note', message: line });
+          onEvent?.({ type: 'note', message: `codex: skipped unparseable stream line: ${truncate(line)}` });
           continue;
         }
 
-        const delta = handleCodexEvent(evt, { toolCalls, textChunks, onEvent });
+        let delta = 0;
+        try {
+          delta = handleCodexEvent(evt, { toolCalls, textChunks, onEvent });
+        } catch (err) {
+          onEvent?.({ type: 'note', message: `codex: skipped malformed event: ${(err as Error).message}` });
+          continue;
+        }
         if (delta > 0) {
+          sawUsage = true;
           tokensUsed += delta;
           if (spec.tokenBudget) {
             spec.tokenBudget.record({ inputTokens: delta });
@@ -102,13 +135,30 @@ export class CodexCliRunner implements AgentRunner {
           }
         }
       }
+    } catch (err) {
+      // A timeout destroys stdout → premature-close error here; expected.
+      if (!timedOut) throw err;
     } finally {
+      clearTimeout(deadline);
+      if (killTimer) clearTimeout(killTimer);
       this.child = null;
     }
 
     const exitCode = await waitForExit(child);
 
     if (spawnFailed) throw spawnFailed;
+
+    const text = textChunks.join('\n').trim();
+    const parsed = spec.responseSchema ? parseStructured(text, spec.responseSchema) : null;
+
+    if (timedOut) {
+      const mins = Math.round((limitMs / 60_000) * 10) / 10;
+      onEvent?.({ type: 'note', message: `timed out after ${mins}m — killed` });
+      onEvent?.({ type: 'error', message: `codex CLI timed out after ${mins}m and was killed` });
+      onEvent?.({ type: 'done' });
+      return { text, parsed, toolCalls, tokensUsed, budgetExceeded: false };
+    }
+
     if (!budgetExceeded && exitCode !== 0 && exitCode !== null) {
       const stderr = stderrChunks.join('').trim();
       const detail = stderr ? ` — ${stderr.split('\n').slice(-3).join(' | ')}` : '';
@@ -117,11 +167,12 @@ export class CodexCliRunner implements AgentRunner {
       throw new Error(msg);
     }
 
+    if (!sawUsage) {
+      // Cost estimate stays null for this backend; usage is "unknown", not 0.
+      onEvent?.({ type: 'note', message: 'token usage not reported by codex CLI' });
+    }
+
     onEvent?.({ type: 'done' });
-
-    const text = textChunks.join('\n').trim();
-    const parsed = spec.responseSchema ? parseStructured(text, spec.responseSchema) : null;
-
     return { text, parsed, toolCalls, tokensUsed, budgetExceeded };
   }
 
@@ -135,9 +186,10 @@ export class CodexCliRunner implements AgentRunner {
 /**
  * Build the `codex exec` argv. `--json` gives the JSONL event stream;
  * `--skip-git-repo-check` avoids a hard failure when the worktree isn't a repo
- * root; `--cd` pins the working root; `-s workspace-write` keeps writes inside
- * the workspace (Codex has no per-tool allowlist — this is the sandbox);
- * `-m` sets the model; the prompt is the trailing positional.
+ * root (linked worktrees included); `--cd` pins the working root; `-s
+ * workspace-write` keeps writes inside the workspace (Codex has no per-tool
+ * allowlist — this is the sandbox); `-m` sets the model; the prompt is the
+ * trailing positional (system prompt folded in with a header).
  */
 function buildCodexArgs<T>(spec: AgentRunSpec<T>): string[] {
   const args: string[] = ['exec', '--json', '--skip-git-repo-check', '-s', 'workspace-write'];
@@ -152,15 +204,19 @@ function buildCodexArgs<T>(spec: AgentRunSpec<T>): string[] {
   }
   // Codex prepends the system prompt as instruction context; there's no
   // dedicated `--append-system-prompt`, so fold it into the prompt body with a
-  // clear header. TODO(phase-0): if Codex grows a system-prompt flag, use it.
+  // clear header.
+  // TODO(phase-4-verify): if Codex grows a system-prompt flag, use it; and
+  // consider `--output-schema <file>` / `--output-last-message <file>` for a
+  // more reliable final-answer / structured-output capture.
   const prompt = spec.systemPrompt.trim()
     ? `${spec.systemPrompt.trim()}\n\n---\n\n${spec.userPrompt}`
     : spec.userPrompt;
-  // TODO(phase-0): `--output-schema <file>` could enforce the response shape;
-  // skipped for now (would require writing a temp file) — we extract from the
-  // final agent message via parseStructured, matching the other backends.
   args.push(prompt);
   return args;
+}
+
+function truncate(s: string, max = 200): string {
+  return s.length > max ? `${s.slice(0, max)}…` : s;
 }
 
 // ---- codex event handling -------------------------------------------------
@@ -302,9 +358,17 @@ async function* readNdjson(stream: NodeJS.ReadableStream): AsyncGenerator<string
 function waitForExit(child: ChildProcessWithoutNullStreams): Promise<number | null> {
   if (child.exitCode != null) return Promise.resolve(child.exitCode);
   return new Promise((resolve) => {
-    child.once('close', (code) => resolve(code));
-    child.once('exit', (code) => resolve(code));
-    child.once('error', () => resolve(null));
+    let done = false;
+    const fin = (code: number | null) => {
+      if (done) return;
+      done = true;
+      resolve(code);
+    };
+    child.once('close', (code) => fin(code));
+    child.once('exit', (code) => fin(code));
+    child.once('error', () => fin(null));
+    const safety = setTimeout(() => fin(child.exitCode ?? null), KILL_GRACE_MS + 5_000);
+    if (typeof safety.unref === 'function') safety.unref();
   });
 }
 

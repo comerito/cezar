@@ -107,6 +107,90 @@ describe('ClaudeCodeCliRunner', () => {
     ).rejects.toThrow(/claude CLI exited with code 1/);
   });
 
+  it('maps allowedTools + bashAllowlist onto Bash(prefix:*) patterns in the argv', async () => {
+    const { spawnFn, calls } = makeFakeSpawn({
+      stdoutLines: [JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'ok', usage: { input_tokens: 1 } })],
+      exitCode: 0,
+    });
+    const runner = new ClaudeCodeCliRunner({ spawnFn });
+    await runner.run({
+      systemPrompt: 's',
+      userPrompt: 'u',
+      cwd: '/tmp',
+      allowedTools: ['Read', 'Grep', 'Bash'],
+      bashAllowlist: ['npm test', 'git status'],
+    });
+    const argv = calls[0].args;
+    expect(argv).toContain('--allowedTools');
+    const idx = argv.indexOf('--allowedTools');
+    expect(argv[idx + 1]).toBe('Read,Grep,Bash(npm test:*),Bash(git status:*)');
+  });
+
+  it('passes a plain Bash entry when no bashAllowlist is given', async () => {
+    const { spawnFn, calls } = makeFakeSpawn({
+      stdoutLines: [JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'ok', usage: { input_tokens: 1 } })],
+      exitCode: 0,
+    });
+    const runner = new ClaudeCodeCliRunner({ spawnFn });
+    await runner.run({ systemPrompt: 's', userPrompt: 'u', cwd: '/tmp', allowedTools: ['Read', 'Bash'] });
+    const argv = calls[0].args;
+    expect(argv[argv.indexOf('--allowedTools') + 1]).toBe('Read,Bash');
+  });
+
+  it('times out a never-exiting subprocess: kills it and resolves with note + error', async () => {
+    const { spawnFn } = makeFakeSpawn({
+      stdoutLines: [JSON.stringify({ type: 'system', subtype: 'init' })],
+      neverExits: true,
+    });
+    const runner = new ClaudeCodeCliRunner({ spawnFn, timeoutMs: 30 });
+    const events: { type: string; message?: string }[] = [];
+    const res = await runner.run(
+      { systemPrompt: 's', userPrompt: 'u', cwd: '/tmp', allowedTools: ['Read'] },
+      (e) => events.push(e as { type: string; message?: string }),
+    );
+    expect(events.some((e) => e.type === 'note' && (e.message ?? '').includes('timed out'))).toBe(true);
+    expect(events.some((e) => e.type === 'error' && (e.message ?? '').includes('timed out'))).toBe(true);
+    expect(res.budgetExceeded).toBe(false);
+    expect(res.parsed).toBeNull();
+  });
+
+  it('emits a "token usage not reported" note when the transcript carries no usage', async () => {
+    const { spawnFn } = makeFakeSpawn({
+      stdoutLines: [
+        JSON.stringify({ type: 'system', subtype: 'init' }),
+        JSON.stringify({ type: 'assistant', message: { role: 'assistant', content: [{ type: 'text', text: 'done' }] } }),
+        JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: 'done' }),
+      ],
+      exitCode: 0,
+    });
+    const runner = new ClaudeCodeCliRunner({ spawnFn });
+    const events: { type: string; message?: string }[] = [];
+    const res = await runner.run(
+      { systemPrompt: 's', userPrompt: 'u', cwd: '/tmp', allowedTools: ['Read'] },
+      (e) => events.push(e as { type: string; message?: string }),
+    );
+    expect(res.tokensUsed).toBe(0);
+    expect(events.some((e) => e.type === 'note' && (e.message ?? '').includes('token usage not reported'))).toBe(true);
+  });
+
+  it('skips a malformed stream line with a note instead of crashing', async () => {
+    const { spawnFn } = makeFakeSpawn({
+      stdoutLines: [
+        'this is not json',
+        JSON.stringify({ type: 'result', subtype: 'success', is_error: false, result: '{"ok":true}', usage: { input_tokens: 1 } }),
+      ],
+      exitCode: 0,
+    });
+    const runner = new ClaudeCodeCliRunner({ spawnFn });
+    const events: { type: string; message?: string }[] = [];
+    const res = await runner.run(
+      { systemPrompt: 's', userPrompt: 'u', cwd: '/tmp', allowedTools: ['Read'], responseSchema: z.object({ ok: z.boolean() }) },
+      (e) => events.push(e as { type: string; message?: string }),
+    );
+    expect(res.parsed).toEqual({ ok: true });
+    expect(events.some((e) => e.type === 'note' && (e.message ?? '').includes('unparseable'))).toBe(true);
+  });
+
   it('falls back to the result message text when no streamed assistant text arrived', async () => {
     const { spawnFn } = makeFakeSpawn({
       stdoutLines: [
