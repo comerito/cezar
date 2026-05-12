@@ -1,28 +1,32 @@
 import { z } from 'zod';
 import { BugDetectorResponseSchema } from '../../actions/bug-detector/prompt.js';
 import { PriorityResponseSchema } from '../../actions/priority/prompt.js';
-import { agentStep, type Workflow, type WorkflowStep, type CommentSection } from '../workflow.js';
+import { agentStep, type Workflow, type WorkflowStep, type WorkflowStepContext, type CommentSection } from '../workflow.js';
 
 /**
- * The `triage` workflow — SKETCH ONLY for Phase 2 (docs §3.2). Cheap and
- * *repo-less*: its `agent` steps wrap the EXISTING triage action prompts so a
- * future webhook trigger (Phase 5) can classify an incoming issue and decide
- * what should happen with it (`autofix` / `needs-info` / `label-only` / `ignore`).
+ * The `triage` workflow (docs §3.2, Phase 5). Cheap and *repo-less*: its `agent`
+ * steps wrap the EXISTING triage action prompts so the GitHub App webhook
+ * (`/api/github/webhook`) can classify an incoming issue and decide what should
+ * happen with it (`autofix` / `needs-info` / `label-only` / `ignore`):
  *
- * This is intentionally minimal: it compiles, has the right shape, and is not
- * wired into any caller yet. TODO(phase-5): trigger this from the GitHub App
- * webhook receiver; if `route === 'autofix' && autofixEnabled` enqueue the
- * autofix workflow, else post the triage summary + apply labels.
+ *   is-a-bug → priority → route-decision → apply-labels → comment-summary
  *
- * The other ~10 triage actions (`categorize`, `security`, `quality`,
+ * The blackboard ends up carrying `{ isBug, priority, route, … }`; the SaaS-side
+ * executor lifts `route` + the bug `issueType`/`confidence` + `priority` into the
+ * `workflow_runs.outcome` JSON, and `maybeEnqueueAutofixFromTriage` reads that to
+ * decide whether to queue an autofix job (only when `route === 'autofix'`,
+ * `autofix_enabled`, and `bugConfidence ≥ minBugConfidence`).
+ *
+ * TODO(phase-5): the dedupe step is still a thin placeholder — a real reuse of
+ * the `duplicates` prompt needs the whole open-issue knowledge base as context.
+ * The ~10 other triage actions (`categorize`, `security`, `quality`,
  * `good-first-issue`, `missing-info`, `needs-response`, `claim-detector`,
  * `contributor-welcome`, `recurring-questions`, `release-notes`,
- * `milestone-planner`, and the mutating `auto-label`/`stale`/`done-detector`/
- * `duplicates` effects) are *optional* triage steps / post-route effects, to be
- * wired in per workspace in Phase 5/6 — not implemented here.
+ * `milestone-planner`, the mutating `stale`/`done-detector`/`duplicates` effects)
+ * remain optional per-workspace triage steps, not wired here.
  */
 
-// ─── NEW: route-decision step ───────────────────────────────────────────────
+// ─── route-decision ─────────────────────────────────────────────────────────
 
 export const RouteDecisionSchema = z.object({
   route: z.enum(['autofix', 'needs-info', 'label-only', 'ignore']),
@@ -42,12 +46,41 @@ Output ONLY a single JSON object (no markdown fences, no prose):
 
 // ─── Blackboard ─────────────────────────────────────────────────────────────
 
+export type TriageIssueType = 'bug' | 'feature' | 'question' | 'other';
+export type TriagePriority = 'critical' | 'high' | 'medium' | 'low';
+
 export interface TriageBlackboard {
-  isBug?: { issueType: 'bug' | 'feature' | 'question' | 'other'; confidence: number; reason: string };
-  priority?: { priority: 'critical' | 'high' | 'medium' | 'low'; reason: string };
-  /** Thin dedupe signal (TODO: a real reuse of the duplicates prompt). */
+  isBug?: { issueType: TriageIssueType; confidence: number; reason: string };
+  priority?: { priority: TriagePriority; reason: string };
+  /** Thin dedupe signal (TODO(phase-5): a real reuse of the duplicates prompt). */
   duplicateOf?: number | null;
   route?: RouteDecision;
+}
+
+/**
+ * The compact summary the SaaS executor records as `workflow_runs.outcome` for a
+ * triage run — `maybeEnqueueAutofixFromTriage` reads `route` / `issueType` /
+ * `bugConfidence`. Build it from a finished run's blackboard via
+ * {@link triageOutcomeFromBlackboard}.
+ */
+export interface TriageOutcome {
+  route: RouteDecision['route'] | null;
+  routeReason: string | null;
+  issueType: TriageIssueType | null;
+  bugConfidence: number | null;
+  priority: TriagePriority | null;
+  duplicateOf: number | null;
+}
+
+export function triageOutcomeFromBlackboard(bb: TriageBlackboard): TriageOutcome {
+  return {
+    route: bb.route?.route ?? null,
+    routeReason: bb.route?.reason ?? null,
+    issueType: bb.isBug?.issueType ?? null,
+    bugConfidence: bb.isBug?.confidence ?? null,
+    priority: bb.priority?.priority ?? null,
+    duplicateOf: bb.duplicateOf ?? null,
+  };
 }
 
 // ─── Steps ──────────────────────────────────────────────────────────────────
@@ -143,6 +176,80 @@ const routeDecisionStep: WorkflowStep<TriageBlackboard> = agentStep<TriageBlackb
   commentSection: (parsed): CommentSection => ({ heading: '🧭 Triage route', body: `\`${parsed.route}\` — ${parsed.reason}` }),
 });
 
+const KNOWN_TYPE_LABELS: Record<TriageIssueType, string | null> = {
+  bug: 'bug',
+  feature: 'enhancement',
+  question: 'question',
+  other: null,
+};
+
+/**
+ * apply-labels — derives a couple of labels from the triage signals and adds
+ * them (additively; we don't `setLabels` so we never strip existing labels).
+ * No-ops for `route === 'ignore'`. TODO(phase-5): make the label set / whether
+ * to apply at all workspace-configurable; for now it's a fixed conservative map.
+ */
+const applyLabelsStep: WorkflowStep<TriageBlackboard> = {
+  id: 'apply-labels',
+  kind: 'effect',
+  builtinSkillId: 'auto-label',
+  run: async (ctx: WorkflowStepContext<TriageBlackboard>, deps) => {
+    const bb = ctx.blackboard;
+    if (bb.route?.route === 'ignore') return { kind: 'continue' };
+    const labels: string[] = [];
+    const typeLabel = bb.isBug ? KNOWN_TYPE_LABELS[bb.isBug.issueType] : null;
+    if (typeLabel) labels.push(typeLabel);
+    if (bb.priority) labels.push(`priority:${bb.priority.priority}`);
+    for (const label of labels) {
+      try {
+        await deps.github.addLabel(ctx.issue.number, label);
+      } catch (err) {
+        ctx.log(`apply-labels: failed to add '${label}': ${(err as Error).message}`);
+      }
+    }
+    return { kind: 'continue' };
+  },
+  commentSection: (): CommentSection => null,
+};
+
+/**
+ * comment-summary — posts (well, the engine's living comment already streams the
+ * per-step sections; this adds the final "what happens next" line). Implemented
+ * as the closing section rather than a separate one-off comment so there's still
+ * exactly one living comment per run (docs §3.6).
+ */
+const commentSummaryStep: WorkflowStep<TriageBlackboard> = {
+  id: 'comment-summary',
+  kind: 'effect',
+  builtinSkillId: 'route-decision',
+  run: async () => ({ kind: 'continue' }),
+  commentSection: (ctx: WorkflowStepContext<TriageBlackboard>): CommentSection => {
+    const bb = ctx.blackboard;
+    const route = bb.route?.route;
+    const autofixEnabled = ctx.config.autofix?.enabled === true;
+    let nextStep: string;
+    switch (route) {
+      case 'autofix':
+        nextStep = autofixEnabled
+          ? '🤖 Cezar will queue an automated fix and open a **draft** PR (if the bug confidence clears the threshold).'
+          : '🤖 This looks auto-fixable, but automatic fixes are disabled for this workspace — enable them in Settings → Workflows to let Cezar open a draft PR.';
+        break;
+      case 'needs-info':
+        nextStep = 'ℹ️ This report seems to be missing information needed to act on it. A maintainer should ask for repro steps / environment details.';
+        break;
+      case 'label-only':
+        nextStep = '🏷 Labelled. No automated follow-up needed.';
+        break;
+      case 'ignore':
+        nextStep = '🚫 Nothing to do here (spam / duplicate / off-topic / already resolved).';
+        break;
+      default:
+        nextStep = 'Triage complete.';
+    }
+    return { heading: '➡️ Next', body: nextStep };
+  },
+};
+
 // ─── Workflow ───────────────────────────────────────────────────────────────
 
 export const triageWorkflow: Workflow<TriageBlackboard> = {
@@ -150,5 +257,5 @@ export const triageWorkflow: Workflow<TriageBlackboard> = {
   title: 'Triage',
   commentTargetOrder: ['issue'],
   initialBlackboard: () => ({}),
-  steps: [isABugStep, priorityStep, dedupeCheckStep, routeDecisionStep],
+  steps: [isABugStep, priorityStep, dedupeCheckStep, routeDecisionStep, applyLabelsStep, commentSummaryStep],
 };

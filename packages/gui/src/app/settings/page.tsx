@@ -4,21 +4,28 @@ import { getSessionUser } from '@/lib/auth';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { SettingsForm } from './settings-form';
 import { TeamSection } from './team-section';
+import { AutomationSection } from './automation-section';
 import type { WorkspaceRole } from '@/lib/supabase/types';
 
 async function loadWorkspaceConfig(workspaceId: string): Promise<{
   config: Record<string, unknown>;
   issueAutofixMode: 'off' | 'notify' | 'autonomous';
+  autoTriageEnabled: boolean;
+  autofixEnabled: boolean;
+  separateCommentPerStep: boolean;
 }> {
   const supabase = createSupabaseAdminClient();
   const { data } = await supabase
     .from('workspaces')
-    .select('config, issue_autofix_mode')
+    .select('config, issue_autofix_mode, auto_triage_enabled, autofix_enabled, separate_comment_per_step')
     .eq('id', workspaceId)
     .single();
   return {
     config: (data?.config as Record<string, unknown>) ?? {},
     issueAutofixMode: (data?.issue_autofix_mode as 'off' | 'notify' | 'autonomous') ?? 'off',
+    autoTriageEnabled: data?.auto_triage_enabled ?? true,
+    autofixEnabled: data?.autofix_enabled ?? false,
+    separateCommentPerStep: data?.separate_comment_per_step ?? false,
   };
 }
 
@@ -73,7 +80,7 @@ export default async function SettingsPage() {
     );
   }
 
-  const [{ config, issueAutofixMode }, members] = await Promise.all([
+  const [{ config, issueAutofixMode, autoTriageEnabled, autofixEnabled, separateCommentPerStep }, members] = await Promise.all([
     loadWorkspaceConfig(workspace.id),
     loadMembers(workspace.id),
   ]);
@@ -98,6 +105,16 @@ export default async function SettingsPage() {
           >
             Map skills, agent backends, and models onto pipeline steps →
           </Link>
+        </section>
+
+        <section>
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">Automation</h2>
+          <AutomationSection
+            autoTriageEnabled={autoTriageEnabled}
+            autofixEnabled={autofixEnabled}
+            separateCommentPerStep={separateCommentPerStep}
+            readOnly={!isAdmin}
+          />
         </section>
 
         <section>

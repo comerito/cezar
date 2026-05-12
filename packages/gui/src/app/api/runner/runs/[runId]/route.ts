@@ -1,5 +1,7 @@
 import { NextResponse } from 'next/server';
 import { authRunner, runnerScopesWorkspace } from '../../_auth';
+import { maybeEnqueueAutofixFromTriage, type TriageOutcomeLike } from '@/lib/maybe-enqueue-autofix-from-triage';
+import { loadWorkspaceConfig } from '@/lib/load-workspace-config';
 import type { Database, DbWorkflowRunStatus, JobStatus } from '@/lib/supabase/types';
 
 export const dynamic = 'force-dynamic';
@@ -39,7 +41,7 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ runId:
   const { runner, admin } = auth;
   const { runId } = await params;
 
-  const { data: run } = await admin.from('workflow_runs').select('id, job_id, workspace_id').eq('id', runId).maybeSingle();
+  const { data: run } = await admin.from('workflow_runs').select('id, job_id, workspace_id, workflow, repo, issue_number').eq('id', runId).maybeSingle();
   if (!run) return NextResponse.json({ error: 'run not found' }, { status: 404 });
   if (!runnerScopesWorkspace(runner, run.workspace_id)) return NextResponse.json({ error: 'forbidden' }, { status: 403 });
 
@@ -68,6 +70,24 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ runId:
       : runStatus === 'failed' ? 'failed'
       : 'done';
     await admin.from('jobs').update({ status: jobStatus, claimed_by_runner: null, updated_at: new Date().toISOString() }).eq('id', run.job_id);
+  }
+
+  // Phase 5 — a runner-driven `triage` run finalizes here; if it concluded
+  // `route: 'autofix'` (and the workspace + confidence allow it) queue the
+  // follow-up autofix job. Best-effort; never blocks the runner's response.
+  if (run.workflow === 'triage' && runStatus === 'succeeded' && run.issue_number != null) {
+    try {
+      const config = await loadWorkspaceConfig(run.workspace_id, admin);
+      await maybeEnqueueAutofixFromTriage(admin, {
+        workspaceId: run.workspace_id,
+        repo: run.repo,
+        issueNumber: run.issue_number,
+        outcome: (body.outcome ?? null) as TriageOutcomeLike | null,
+        workspaceConfig: config,
+      });
+    } catch (err) {
+      console.error('[runner-finalize] triage→autofix enqueue failed:', err instanceof Error ? err.message : err);
+    }
   }
 
   return NextResponse.json({ ok: true });

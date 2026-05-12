@@ -16,8 +16,8 @@ GitHub → *Settings* → *Developer settings* → *GitHub Apps* → *New GitHub
 
 - **Name:** anything (e.g. `cezar` / `<org>-cezar`).
 - **Homepage URL:** your Cezar deployment URL (or a placeholder).
-- **Webhook:** leave **disabled** for now (webhooks land in Phase 5; you'll set
-  a `GITHUB_APP_WEBHOOK_SECRET` then).
+- **Webhook:** enable it (see [§5 below](#5-webhooks-phase-5)). If you'd rather
+  skip webhooks, leave it disabled and rely on the `/api/cron/triage-sweep` poll.
 - **Repository permissions** — grant the minimum needed:
   - **Contents:** Read-only (clone repos / read `.ai/skills/`)
   - **Issues:** Read & write (read issues, post triage/autofix comments)
@@ -48,8 +48,9 @@ Set these wherever Cezar runs (Vercel project env, your shell, your runner):
 - `GITHUB_APP_PRIVATE_KEY` — the contents of the downloaded `.pem` file. If
   your env store is single-line only, you can paste it with literal `\n`
   sequences instead of real newlines — Cezar normalizes those.
-- `GITHUB_APP_WEBHOOK_SECRET` — **not used yet**; reserved for the Phase 5
-  webhook receiver.
+- `GITHUB_APP_WEBHOOK_SECRET` — the App's webhook secret (see [§5](#5-webhooks-phase-5)).
+  Without it, `/api/github/webhook` returns **503** and you rely on the
+  `/api/cron/triage-sweep` poll fallback.
 
 When both `GITHUB_APP_ID` and `GITHUB_APP_PRIVATE_KEY` are present,
 `GitHubAppService.isConfigured()` returns true and Cezar prefers an installation
@@ -62,3 +63,46 @@ fails.
 If you don't set these env vars, nothing breaks: Cezar uses the GitHub OAuth
 token from sign-in for all repo operations, exactly as before. Private-repo
 skill discovery still works as long as the signed-in user can read the repo.
+
+## 5. Webhooks (Phase 5)
+
+The webhook receiver (`POST /api/github/webhook`) is how Cezar learns about new
+issues in real time and auto-triages them.
+
+1. On the App's settings page, enable **Webhook** and set:
+   - **Webhook URL:** `https://<your-cezar>/api/github/webhook`
+   - **Webhook secret:** a random string. Put the *same* value in the Cezar env
+     as `GITHUB_APP_WEBHOOK_SECRET`. The receiver verifies the
+     `X-Hub-Signature-256` HMAC against it; a missing secret ⇒ **503**, a bad
+     signature ⇒ **401**.
+2. Under *Subscribe to events*, check at minimum:
+   - **Issues** — drives auto-triage (`opened` / `reopened` / title-or-body
+     `edited` → enqueue a `triage` job).
+   - **Pull requests** — reserved for a future webhook-driven PR↔issue link
+     (currently a no-op; the `issue-match` cron handles it).
+   - **Check runs** — reserved for a future webhook-driven CI follow-up
+     (currently a no-op; the `ci-watch` / `ci-attribute` / `ci-fix` crons handle
+     it).
+   - **Installation** / **Installation repositories** — so installing the App
+     records `installation_id` on the matching workspace(s).
+3. The receiver does no agent work — it just upserts the issue and queues a
+   `triage` job; `/api/cron/dispatch` (or a self-hosted runner) drains it.
+
+### Poll fallback
+
+`GET /api/cron/triage-sweep` (Vercel cron, every 10 min; same `CRON_SECRET`
+auth as the other crons) finds open issues that have never been triaged and
+enqueues `triage` jobs for them — the catch-up path for installs without
+webhooks or missed deliveries. Tunable batch via `CEZAR_TRIAGE_SWEEP_BATCH`
+(default 10 issues / workspace / tick).
+
+### Conservative defaults
+
+- `auto_triage_enabled` defaults **on** — new issues get triaged (classification
+  + priority + a couple of derived labels + a summary comment). Toggle it in
+  *Settings → Automation*.
+- `autofix_enabled` defaults **off** — Cezar won't open PRs by itself until you
+  flip it. When on, triage-driven autofix fires **only** on issues classified as
+  `bug` whose confidence clears `autofix.minBugConfidence` (config, default 0.7),
+  and the PR is **always opened as a draft**. Below the threshold, no autofix is
+  queued (a triage-driven human-gate for review is a planned follow-up).

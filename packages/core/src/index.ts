@@ -206,8 +206,12 @@ export {
 export {
   triageWorkflow,
   RouteDecisionSchema,
+  triageOutcomeFromBlackboard,
   type TriageBlackboard,
   type RouteDecision,
+  type TriageOutcome,
+  type TriageIssueType,
+  type TriagePriority,
 } from './workflows/definitions/triage.workflow.js';
 
 // Pipeline

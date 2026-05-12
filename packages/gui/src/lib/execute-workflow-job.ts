@@ -2,6 +2,7 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { AgentRunRecord, CiFollowupInput } from '@cezar/core';
 import { SupabaseStoreAdapter } from './adapters/supabase-store';
 import { loadWorkspaceConfig } from './load-workspace-config';
+import { maybeEnqueueAutofixFromTriage } from './maybe-enqueue-autofix-from-triage';
 import { ensureRepoClone } from './repo-clone';
 import type { Database, AgentRunEventType } from './supabase/types';
 
@@ -240,7 +241,10 @@ export async function executeWorkflowJob(
       headSha = 'headSha' in outcome ? outcome.headSha ?? null : null;
       outPrNumber = ciFollowupSeed.prNumber ?? outPrNumber;
     } else {
-      // triage — repo-less sketch workflow (full wiring is Phase 5).
+      // triage — repo-less classification workflow (docs §3.2). The blackboard
+      // ends carrying route/isBug/priority; we lift those into `outcome` so the
+      // autofix-enqueue helper (below) — and the runner-finalize PATCH route —
+      // can decide whether to queue an autofix job.
       const result = await core.runWorkflow(core.triageWorkflow, {
         store,
         config,
@@ -255,7 +259,8 @@ export async function executeWorkflowJob(
         pauseRequested,
         cancelRequested,
       });
-      outcomeJson = { status: result.status, reason: result.reason };
+      const triageOutcome = core.triageOutcomeFromBlackboard(result.blackboard);
+      outcomeJson = { status: result.status, reason: result.reason, ...triageOutcome };
       runStatus =
         result.status === 'succeeded' ? 'succeeded'
         : result.status === 'paused' ? 'paused'
@@ -263,6 +268,15 @@ export async function executeWorkflowJob(
         : 'failed';
       reason = result.reason;
       tokensUsed = result.tokensUsed;
+      if (runStatus === 'succeeded') {
+        await maybeEnqueueAutofixFromTriage(adminSupabase, {
+          workspaceId,
+          repo: repoSlug,
+          issueNumber: runIssueNumber,
+          outcome: triageOutcome,
+          workspaceConfig: config,
+        });
+      }
     }
 
     // The engine path doesn't surface tokensUsed through the autofix outcome,
