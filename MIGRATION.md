@@ -80,22 +80,29 @@ Set these in the GUI app's environment (Vercel project settings, `.env`, etc.):
 | `CEZAR_RUNNER_OFFLINE_MINUTES` | `/api/cron/dispatch` | optional, default `3` — dead-runner job re-queue cutoff |
 | `CEZAR_TRIAGE_SWEEP_BATCH` | `/api/cron/triage-sweep` | optional, default `10` — triage jobs enqueued per workspace per tick |
 | `CEZAR_INPROCESS_CRON` | self-hosted Node deployments | set to `true` to start the in-process scheduler at server boot (see "Cron source" below). Leave unset on Vercel. |
-| `CEZAR_DISPATCH_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) — how often the in-process scheduler runs dispatch |
-| `CEZAR_TRIAGE_SWEEP_INTERVAL_MS` | in-process scheduler | optional, default `600000` (10 min) — how often the in-process scheduler runs the triage-sweep |
+| `CEZAR_INPROCESS_CRON_BASE_URL` | in-process scheduler | optional — base URL the scheduler `fetch`es; defaults to `NEXT_PUBLIC_APP_URL` / `https://$VERCEL_URL` / `http://127.0.0.1:$PORT` |
+| `CEZAR_INPROCESS_CRON_DISABLED` | in-process scheduler | optional CSV of route paths to skip, e.g. `/api/cron/ci-fix,/api/cron/issue-sync` |
+| `CEZAR_INPROCESS_CRON_LEGACY` | in-process scheduler | optional — set to `false` to skip the 6 legacy cron routes (drive them externally instead). Default = run them. |
+| `CEZAR_DISPATCH_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
+| `CEZAR_TRIAGE_SWEEP_INTERVAL_MS` | in-process scheduler | optional, default `600000` (10 min) |
+| `CEZAR_CRON_ISSUE_SYNC_INTERVAL_MS` | in-process scheduler | optional, default `300000` (5 min) — matches the Vercel cadence |
+| `CEZAR_CRON_ISSUE_MATCH_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
+| `CEZAR_CRON_ISSUE_FIX_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
+| `CEZAR_CRON_CI_WATCH_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
+| `CEZAR_CRON_CI_ATTRIBUTE_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
+| `CEZAR_CRON_CI_FIX_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
 
 ### Cron source
 
-The dispatcher (`/api/cron/dispatch`) and triage-sweep (`/api/cron/triage-sweep`) need to fire on a schedule. Pick whichever fits your deployment:
+Every `/api/cron/*` route (the 2 new ones and the 6 legacy ones) needs to fire on a schedule. Pick whichever fits your deployment:
 
-- **Self-hosted long-running Node** (Docker / Fly / Railway / Render / VPS — the recommended setup): set `CEZAR_INPROCESS_CRON=true`. Next 15's `instrumentation.ts` hook starts an in-process scheduler at server boot that calls the same handler logic on `setInterval` (intervals via the `CEZAR_*_INTERVAL_MS` env vars above). No extra processes, no extra infra; an overlap guard skips a tick if the previous one is still in flight. Each replica ticks independently — that's safe (`claim_next_job` uses `FOR UPDATE SKIP LOCKED`, the sweep dedupes); scale horizontally only if a single replica can't keep up.
-- **Vercel**: leave `CEZAR_INPROCESS_CRON` unset and let the `vercel.json` schedules (`/api/cron/dispatch` every minute, `/api/cron/triage-sweep` every 10 min) drive it.
-- **External cron** (cron-job.org, GitHub Actions schedule, OS crontab, Kubernetes `CronJob`, …): leave `CEZAR_INPROCESS_CRON` unset and hit `GET https://<your-cezar>/api/cron/dispatch` and `GET https://<your-cezar>/api/cron/triage-sweep` on a schedule with `Authorization: Bearer $CRON_SECRET`.
+- **Self-hosted long-running Node** (Docker / Fly / Railway / Render / VPS — the recommended setup): set `CEZAR_INPROCESS_CRON=true`. Next 15's `instrumentation.ts` hook starts an in-process scheduler at server boot that `fetch`es every cron route on `setInterval` at the cadence matching `vercel.json` (overridable per-route via the `CEZAR_*_INTERVAL_MS` env vars). Per-route overlap guard, idempotent boot (HMR-safe), SIGTERM/SIGINT clean. Disable individual routes via `CEZAR_INPROCESS_CRON_DISABLED` (CSV of paths); turn off all legacy routes via `CEZAR_INPROCESS_CRON_LEGACY=false`. Each replica ticks independently — safe (`claim_next_job` uses `FOR UPDATE SKIP LOCKED`, the sweep and the legacy crons all dedupe) just wasteful; scale horizontally only if a single replica can't keep up.
+- **Vercel**: leave `CEZAR_INPROCESS_CRON` unset and let the `vercel.json` schedules drive every route.
+- **External cron** (cron-job.org, GitHub Actions schedule, OS crontab, Kubernetes `CronJob`, …): leave `CEZAR_INPROCESS_CRON` unset and hit each route on its own schedule with `Authorization: Bearer $CRON_SECRET`.
 
 Deploy the GUI app from `feat/agent-cockpit-refactor` (or after merge) and pick one of the above.
 
-> **Heads-up (long-running agents):** `/api/cron/dispatch` fire-and-forgets workflow execution — the same pattern as the existing `issue-fix` cron. On a long-running Node host that's fine (the process stays alive). On serverless (Vercel) a long agent run can outlive the function; `requeue_stalled_jobs()` is the safety net, and the proper fix is running `@cezar/runner` in `--kind cloud` on a long-lived container.
-
-> **About the 6 legacy crons** (`issue-sync`, `issue-match`, `issue-fix`, `ci-watch`, `ci-attribute`, `ci-fix`): the in-process scheduler does **not** auto-run these. They're scheduled in `vercel.json` only and are retired post-cutover (Step 9). If you're on a non-Vercel host and still relying on them, drive them via external cron until the cutover.
+> **Heads-up (long-running agents):** `/api/cron/dispatch` and `/api/cron/issue-fix` fire-and-forget workflow execution. On a long-running Node host that's fine (the process stays alive). On serverless (Vercel) a long agent run can outlive the function; `requeue_stalled_jobs()` is the safety net, and the proper fix is running `@cezar/runner` in `--kind cloud` on a long-lived container.
 
 ---
 
