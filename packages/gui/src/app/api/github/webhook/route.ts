@@ -1,0 +1,339 @@
+import { createHmac, timingSafeEqual } from 'node:crypto';
+import { NextResponse } from 'next/server';
+import { createSupabaseAdminClient } from '@/lib/supabase/server';
+import { upsertIssueFromWebhook, type WebhookIssue } from '@/lib/upsert-issue-from-webhook';
+import type { Database } from '@/lib/supabase/types';
+
+export const dynamic = 'force-dynamic';
+export const runtime = 'nodejs';
+
+/**
+ * Phase 5 — the GitHub App webhook receiver (docs §3.7). Verifies the
+ * `X-Hub-Signature-256` HMAC, then dispatches on `X-GitHub-Event`:
+ *
+ *   - `issues` (opened / reopened / title-or-body edited): upsert the issue into
+ *     the matching workspace(s) and enqueue a (deduped) `triage` job. The
+ *     `/api/cron/dispatch` cron / a self-hosted runner drains it.
+ *   - `check_run` (completed/failure): no-op — the ci-watch/ci-attribute/ci-fix
+ *     crons already drive the CI follow-up loop (it needs an attribution seed
+ *     they produce). TODO(phase-5): convert that to webhook-driven jobs.
+ *   - `pull_request`: no-op — the issue-match cron handles PR↔issue linking.
+ *     TODO(phase-5).
+ *   - `installation` / `installation_repositories`: best-effort record the
+ *     installation id on the matching workspace(s).
+ *   - `ping` → `{ ok: true }`. Anything else → `{ ignored: true }`.
+ *
+ * Always responds fast — no agent work happens here. Without
+ * `GITHUB_APP_WEBHOOK_SECRET` set it returns 503 (so a missing setup is
+ * obvious; the `/api/cron/triage-sweep` poll is the fallback in that case).
+ */
+export async function POST(req: Request): Promise<NextResponse> {
+  const secret = process.env.GITHUB_APP_WEBHOOK_SECRET;
+  if (!secret) {
+    return NextResponse.json({ error: 'webhook secret not configured' }, { status: 503 });
+  }
+
+  let rawBody: string;
+  try {
+    rawBody = await req.text();
+  } catch {
+    return NextResponse.json({ error: 'unreadable body' }, { status: 400 });
+  }
+
+  const signature = req.headers.get('x-hub-signature-256') ?? '';
+  if (!verifySignature(rawBody, signature, secret)) {
+    return NextResponse.json({ error: 'bad signature' }, { status: 401 });
+  }
+
+  const event = req.headers.get('x-github-event') ?? '';
+
+  let payload: WebhookPayload;
+  try {
+    payload = JSON.parse(rawBody) as WebhookPayload;
+  } catch {
+    return NextResponse.json({ error: 'invalid json' }, { status: 400 });
+  }
+
+  try {
+    const admin = createSupabaseAdminClient();
+    switch (event) {
+      case 'ping':
+        return NextResponse.json({ ok: true });
+      case 'issues':
+        return await handleIssues(admin, payload);
+      case 'check_run':
+        return await handleCheckRun(admin, payload);
+      case 'pull_request':
+        // PR↔issue linking is no longer tracked separately; the autofix workflow
+        // owns the PR it opens and the cockpit links runs to their PRs via
+        // `workflow_runs.pr_number`. No-op here for now.
+        return NextResponse.json({ ok: true, ignored: 'pull_request not used' });
+      case 'installation':
+      case 'installation_repositories':
+        return await handleInstallation(admin, payload);
+      default:
+        return NextResponse.json({ ignored: true, event });
+    }
+  } catch (err) {
+    const msg = err instanceof Error ? err.message : String(err);
+    console.error(`[github-webhook] ${event} handler failed:`, msg);
+    return NextResponse.json({ error: 'handler error' }, { status: 500 });
+  }
+}
+
+// ─── signature ──────────────────────────────────────────────────────────────
+
+function verifySignature(rawBody: string, headerValue: string, secret: string): boolean {
+  if (!headerValue.startsWith('sha256=')) return false;
+  const expected = `sha256=${createHmac('sha256', secret).update(rawBody, 'utf8').digest('hex')}`;
+  const a = Buffer.from(headerValue, 'utf8');
+  const b = Buffer.from(expected, 'utf8');
+  if (a.length !== b.length) return false;
+  try {
+    return timingSafeEqual(a, b);
+  } catch {
+    return false;
+  }
+}
+
+// ─── payload shapes (the slices we touch) ───────────────────────────────────
+
+interface WebhookPayload {
+  action?: string;
+  changes?: { title?: unknown; body?: unknown };
+  issue?: WebhookIssue;
+  repository?: { name: string; owner: { login: string } };
+  installation?: { id: number };
+  check_run?: {
+    name: string;
+    status: string;
+    conclusion: string | null;
+    head_sha: string;
+    html_url: string | null;
+    pull_requests?: Array<{ number: number; head?: { ref?: string }; base?: { ref?: string } }>;
+  };
+}
+
+// ─── issues ─────────────────────────────────────────────────────────────────
+
+const TRIAGE_ACTIONS = new Set(['opened', 'reopened']);
+
+async function handleIssues(admin: SupabaseAdmin, payload: WebhookPayload): Promise<NextResponse> {
+  const action = payload.action ?? '';
+  const relevant =
+    TRIAGE_ACTIONS.has(action) ||
+    (action === 'edited' && !!payload.changes && ('title' in payload.changes || 'body' in payload.changes));
+  if (!relevant) return NextResponse.json({ ok: true, ignored: `issues.${action}` });
+
+  const issue = payload.issue;
+  const repo = payload.repository;
+  if (!issue || !repo) return NextResponse.json({ ok: true, ignored: 'issues event missing issue/repository' });
+
+  const workspaces = await resolveWorkspaces(admin, payload, repo);
+  if (workspaces.length === 0) return NextResponse.json({ ok: true, ignored: 'no matching workspace' });
+
+  const repoSlug = `${repo.owner.login}/${repo.name}`;
+  let enqueued = 0;
+  for (const ws of workspaces) {
+    if (!ws.auto_triage_enabled) continue;
+    try {
+      await upsertIssueFromWebhook(admin, ws.id, issue);
+    } catch (err) {
+      console.error(`[github-webhook] issue upsert failed for ws ${ws.id}:`, err instanceof Error ? err.message : err);
+      continue;
+    }
+    // dedupe: skip if a triage job for this issue is already in flight.
+    const { data: open } = await admin
+      .from('jobs')
+      .select('id')
+      .eq('workspace_id', ws.id)
+      .eq('kind', 'triage')
+      .eq('issue_number', issue.number)
+      .in('status', ['queued', 'claimed', 'running'])
+      .limit(1);
+    if (open && open.length > 0) continue;
+    const { error } = await admin.from('jobs').insert({
+      workspace_id: ws.id,
+      repo: repoSlug,
+      kind: 'triage',
+      issue_number: issue.number,
+      pr_number: null,
+      priority: 5,
+      status: 'queued',
+      max_attempts: 1,
+      payload: { trigger: 'webhook', action },
+    });
+    if (error) {
+      console.error(`[github-webhook] triage enqueue failed for ws ${ws.id}:`, error.message);
+      continue;
+    }
+    enqueued++;
+  }
+  return NextResponse.json({ ok: true, enqueued, workspaces: workspaces.length });
+}
+
+// ─── check_run ──────────────────────────────────────────────────────────────
+
+/**
+ * `check_run.completed` with a failing conclusion on a PR that an autofix run
+ * opened → enqueue a `ci-followup` job whose payload carries the CiFollowupInput
+ * seed. The dispatcher (or runner) drains it via the engine's `ci-followup`
+ * workflow, which posts a fix attempt back to the same PR.
+ *
+ * Only acts when:
+ *   - `action === 'completed'` and `conclusion` is a failure-ish state
+ *     (`failure` / `timed_out` / `cancelled` / `action_required` / `startup_failure`).
+ *   - the head_sha (or one of the linked PRs) corresponds to a `workflow_runs`
+ *     row from THIS workspace where `workflow === 'autofix'` and `status === 'succeeded'`
+ *     (i.e. the autofix did open a PR — not a third-party PR happening to fail).
+ *
+ * The `attribution` field is a *seed*; the real attribution happens inside the
+ * `ci-followup` workflow's `attribute` step. We pass through the failed check
+ * name(s) and the html_url (so the agent can fetch logs if it wants).
+ */
+const CHECK_RUN_FAIL_CONCLUSIONS = new Set(['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure']);
+
+async function handleCheckRun(admin: SupabaseAdmin, payload: WebhookPayload): Promise<NextResponse> {
+  if (payload.action !== 'completed') return NextResponse.json({ ok: true, ignored: `check_run.${payload.action}` });
+  const cr = payload.check_run;
+  const repo = payload.repository;
+  if (!cr || !repo) return NextResponse.json({ ok: true, ignored: 'check_run missing payload/repo' });
+  if (cr.conclusion == null || !CHECK_RUN_FAIL_CONCLUSIONS.has(cr.conclusion)) {
+    return NextResponse.json({ ok: true, ignored: `check_run conclusion=${cr.conclusion}` });
+  }
+  const linkedPrNumbers = (cr.pull_requests ?? []).map((p) => p.number);
+  if (linkedPrNumbers.length === 0) {
+    return NextResponse.json({ ok: true, ignored: 'check_run not linked to any PR' });
+  }
+
+  const workspaces = await resolveWorkspaces(admin, payload, repo);
+  if (workspaces.length === 0) return NextResponse.json({ ok: true, ignored: 'no matching workspace' });
+
+  const repoSlug = `${repo.owner.login}/${repo.name}`;
+  let enqueued = 0;
+
+  for (const ws of workspaces) {
+    // Find the autofix workflow_run that owns one of the linked PRs.
+    const { data: ownRuns } = await admin
+      .from('workflow_runs')
+      .select('id, issue_number, pr_number, branch')
+      .eq('workspace_id', ws.id)
+      .eq('workflow', 'autofix')
+      .in('pr_number', linkedPrNumbers)
+      .limit(1);
+    const ownRun = ownRuns?.[0];
+    if (!ownRun || ownRun.issue_number == null || ownRun.pr_number == null) continue;
+
+    // Count prior ci-followup attempts for this PR so the agent honours the
+    // attempt cap. (`workflow_runs.pr_number` is the source of truth.)
+    const { count: priorAttempts } = await admin
+      .from('workflow_runs')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', ws.id)
+      .eq('workflow', 'ci-followup')
+      .eq('pr_number', ownRun.pr_number);
+    const attemptMax = 3;
+    if ((priorAttempts ?? 0) >= attemptMax) continue;
+
+    // Dedupe — skip if a ci-followup job is already queued for this PR.
+    const { data: open } = await admin
+      .from('jobs')
+      .select('id')
+      .eq('workspace_id', ws.id)
+      .eq('kind', 'ci-followup')
+      .eq('pr_number', ownRun.pr_number)
+      .in('status', ['queued', 'claimed', 'running'])
+      .limit(1);
+    if (open && open.length > 0) continue;
+
+    // Build the CiFollowupInput seed. The `attribute` workflow step does the
+    // real attribution work; this just provides the entry point.
+    const ciFollowupSeed = {
+      issueNumber: ownRun.issue_number,
+      prNumber: ownRun.pr_number,
+      branch: ownRun.branch ?? '',
+      attemptIndex: (priorAttempts ?? 0) + 1,
+      attemptMax,
+      attribution: {
+        reasoning: `check_run '${cr.name}' on PR #${ownRun.pr_number} concluded '${cr.conclusion}'`,
+        preExistingChecks: [],
+      },
+      failedCheckNames: [cr.name],
+      logTails: cr.html_url ? [{ checkName: cr.name, lines: [`(see ${cr.html_url})`] }] : undefined,
+    };
+
+    const { error } = await admin.from('jobs').insert({
+      workspace_id: ws.id,
+      repo: repoSlug,
+      kind: 'ci-followup',
+      issue_number: ownRun.issue_number,
+      pr_number: ownRun.pr_number,
+      priority: 8,
+      status: 'queued',
+      max_attempts: 1,
+      payload: { trigger: 'webhook', ciFollowup: ciFollowupSeed },
+    });
+    if (error) {
+      console.error(`[github-webhook] ci-followup enqueue failed for ws ${ws.id}:`, error.message);
+      continue;
+    }
+    enqueued++;
+  }
+
+  return NextResponse.json({ ok: true, enqueued, workspaces: workspaces.length });
+}
+
+// ─── installation ───────────────────────────────────────────────────────────
+
+async function handleInstallation(admin: SupabaseAdmin, payload: WebhookPayload): Promise<NextResponse> {
+  const action = payload.action ?? '';
+  const installationId = payload.installation?.id;
+  const repo = payload.repository;
+  try {
+    if (action === 'created' || action === 'added') {
+      if (installationId != null && repo) {
+        await admin
+          .from('workspaces')
+          .update({ installation_id: String(installationId) })
+          .eq('repo_owner', repo.owner.login)
+          .eq('repo_name', repo.name);
+      }
+    } else if (action === 'deleted' || action === 'removed') {
+      if (installationId != null) {
+        await admin.from('workspaces').update({ installation_id: null }).eq('installation_id', String(installationId));
+      } else if (repo) {
+        await admin.from('workspaces').update({ installation_id: null }).eq('repo_owner', repo.owner.login).eq('repo_name', repo.name);
+      }
+    }
+  } catch (err) {
+    console.error('[github-webhook] installation update failed:', err instanceof Error ? err.message : err);
+  }
+  return NextResponse.json({ ok: true });
+}
+
+// ─── workspace resolution ───────────────────────────────────────────────────
+
+type SupabaseAdmin = ReturnType<typeof createSupabaseAdminClient>;
+type WorkspaceMatch = Pick<Database['public']['Tables']['workspaces']['Row'], 'id' | 'auto_triage_enabled'>;
+
+/** Match by `installation_id` first (preferred), else by `repo_owner`/`repo_name`. */
+async function resolveWorkspaces(
+  admin: SupabaseAdmin,
+  payload: WebhookPayload,
+  repo: { name: string; owner: { login: string } },
+): Promise<WorkspaceMatch[]> {
+  const installationId = payload.installation?.id;
+  if (installationId != null) {
+    const { data } = await admin
+      .from('workspaces')
+      .select('id, auto_triage_enabled')
+      .eq('installation_id', String(installationId));
+    if (data && data.length > 0) return data;
+  }
+  const { data } = await admin
+    .from('workspaces')
+    .select('id, auto_triage_enabled')
+    .eq('repo_owner', repo.owner.login)
+    .eq('repo_name', repo.name);
+  return data ?? [];
+}

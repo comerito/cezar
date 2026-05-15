@@ -1,6 +1,9 @@
 # Cezar
 
-**Cezar brings order to chaotic GitHub backlogs.** Sync issues locally, let Claude analyze them, then triage through a clean interactive CLI. 14 built-in actions cover duplicates, priorities, stale issues, security, labeling, and more. Built for maintainers who'd rather ship than sort.
+**Cezar is a team SaaS for running AI coding agents on GitHub issues.** It's a
+cockpit: every agent run — queued, running, paused, failed, finished — is visible
+with controls. Incoming issues are auto-triaged. Bug fixes run as a skill-driven,
+multi-step **autofix workflow** that ends in a draft PR.
 
 ```
    ·  ██████╗  ███████╗ ███████╗  █████╗  ██████╗  ·
@@ -9,275 +12,223 @@
    · ██║       ██╔══╝    ███╔╝   ██╔══██║ ██╔══██╗ ·
    · ╚██████╗  ███████╗ ███████╗ ██║  ██║ ██║  ██║ ·
    ·  ╚═════╝  ╚══════╝ ╚══════╝ ╚═╝  ╚═╝ ╚═╝  ╚═╝ ·
-           AI-powered GitHub issue management
-
-┌──────────────────────────────────────────────────┐
-│  🗂  Cezar   your-org/your-repo                  │
-│  143 open · 45 closed · synced 2 hours ago       │
-│  Digested: 143/143                               │
-└──────────────────────────────────────────────────┘
-
-? What would you like to do?
-
-  Triage
-❯ 🔍  Find Duplicates            45 unanalyzed
-  🏷️  Auto-Label Issues           32 unanalyzed
-  ❓  Request Missing Info        18 unanalyzed
-  🔁  Recurring Questions         12 unanalyzed
-  🧹  Stale Issue Cleanup          9 stale
-  ✅  Done Detector                5 unchecked
-
-  Intelligence
-  📊  Priority Score              45 unscored
-  🔒  Security Triage             45 unchecked
-
-  Community
-  🌱  Good First Issues           45 unchecked
-  👋  Welcome New Contributors     3 pending
-  🙋  Claim Detector              45 unchecked
-  🔎  Issue Quality Check         45 unchecked
-
-  Release
-  📋  Release Notes
-  🗺️  Milestone Planner
+              AI coding agents for GitHub issues
 ```
 
-## Why Cezar?
+> **Status — refactor in progress.** Phases 0–5 of the agent-cockpit refactor are
+> merged but **dark**: nothing changes runtime behavior until you activate it.
+> See **[`MIGRATION.md`](./MIGRATION.md)** for the activation runbook and
+> **[`docs/REFACTOR-PLAN-agent-cockpit.md`](./docs/REFACTOR-PLAN-agent-cockpit.md)**
+> for the design of record. The legacy autofix loop (the 6 `/api/cron/*` routes)
+> and the `/flows` UI remain in place until the live cutover; `config.workflow.useEngine`
+> defaults **off** (legacy path runs unchanged). The solo-use **[Legacy CLI](#legacy-cli)**
+> (interactive hub + `init`/`sync`/`run`/`status`) still works.
 
-- **Offline-first** — issues live in a local JSON store after the initial fetch. No repeated API calls.
-- **AI-powered digests** — Claude generates compact summaries so analysis works on meaning, not keywords.
-- **Comment-aware** — actions see the full conversation, not just the issue body. No more false positives from ignoring follow-up comments.
-- **Interactive by default** — a guided TUI handles everything: setup, sync, analysis, and review.
-- **Plugin architecture** — every analysis action is a self-contained module. Adding a new one means creating a folder.
-- **Incremental** — sync only fetches what changed. Actions only process unanalyzed issues. New comments automatically trigger re-analysis.
-- **CI-ready** — every action works non-interactively with `--no-interactive`, `--apply`, and `--dry-run` flags.
+---
 
-## Requirements
+## Overview
 
-- Node.js 20+
-- A [GitHub token](https://github.com/settings/tokens) (classic or fine-grained with `repo` read access)
-- An [Anthropic API key](https://console.anthropic.com/)
+A bug report lands on GitHub. Cezar's webhook receiver enqueues a **triage** job;
+the triage workflow classifies it (bug / feature / question / spam …), applies a
+couple of labels, posts a summary comment, and — if it's a high-confidence bug and
+the workspace has autofix enabled — enqueues an **autofix** job.
 
-## Installation
+The autofix workflow is a declarative pipeline of steps:
+
+```
+verify-in-repo  →  root-cause  →  fix  →  review-loop  →  open PR (draft)
+```
+
+Each step binds (in the web GUI: **Settings → Workflows**) to:
+
+- a **skill** — a Markdown file auto-discovered from `.ai/skills/` in the target
+  repo (optional YAML frontmatter: `name`, `description`, `cezar-stages`). Empty
+  `.ai/skills/` is fully supported — every step falls back to its built-in default.
+- an **agent backend** — Anthropic API · Claude Code CLI · Codex CLI.
+- a **model** — e.g. `claude-sonnet-4`, `claude-haiku-4-5`.
+- optional **extra tools**.
+
+Resolution order: step binding → run-launch override → workspace default → built-in
+default. So an unconfigured workspace behaves exactly like today.
+
+Agents run via one of two paths:
+
+- **Managed cloud** — your `ANTHROPIC_API_KEY`, dispatched by the `/api/cron/dispatch`
+  cron (every minute). No infra to run.
+- **Self-hosted runner** — the optional [`@cezar/runner`](#cezarrunner) daemon, so
+  you can run subscription CLIs (`claude`, `codex`) under *your own* login on *your
+  own* infra. It long-polls for jobs whose backend it serves, runs the workflow
+  locally, and streams the event log back.
+
+While a run executes, the **cockpit** (`/cockpit`, `/cockpit/[runId]`) shows the
+step graph filling in live (Supabase Realtime), with pause / cancel / resume and a
+`human-gate` step that pauses for a decision when fix confidence is low.
+
+---
+
+## Packages
+
+This is a Yarn 4 monorepo (`packages/*`).
+
+| Package | What it is |
+|---|---|
+| **`@cezar/core`** | The engine: store schemas, GitHub/LLM services, the agent-runner abstraction, the declarative workflow engine + the `autofix` / `ci-followup` / `triage` workflow definitions, the `.ai/skills/` catalog, the action plugin system, and the headless pipeline. No UI. |
+| **`cezar`** (CLI) | The interactive hub + `init` / `sync` / `run` / `status` / `runs` commands. Solo-use front end over `@cezar/core`. |
+| **`@cezar/gui`** | The Next.js 15 app: the cockpit, Settings (Workflows / Runners / Automation), the workspace CRUD + auth, the job queue, the GitHub App webhook receiver, and the cron routes. Supabase-backed. |
+| **`@cezar/runner`** | The optional self-hosted runner daemon (`cezar-runner login` / `start`). Claims `claude-cli` / `codex-cli` jobs, runs the engine locally, heartbeats. |
+
+---
+
+## Architecture
+
+**Three data phases** (the original CLI core, still how issues get into the store):
+
+1. **Fetch** — `init`/`sync` (CLI) or the issue-sync cron (GUI) pulls issues from
+   the GitHub API into the store. CLI store = a local JSON file (`.issue-store/store.json`);
+   GUI store = Supabase.
+2. **Digest** — Claude generates a compact (~80-token) summary per issue: category,
+   affected area, keywords. Comments are fetched and stored too.
+3. **Analyze** — actions (the plugin system) run against digests + comments. Each
+   action writes to its own namespace; actions are independent and re-run only on
+   new work.
+
+**The workflow engine** (`@cezar/core/workflows/`): a declarative `Workflow` is an
+ordered list of steps (`agent` / `effect` / `human-gate` / `commit` / `open-pr` / …)
+with optional loops. `runWorkflow` executes it, threading a blackboard, emitting an
+`AgentRunRecord` per step, and posting one *living* comment on the issue (then the
+PR) that's edited as steps complete. Three definitions ship: `autofixWorkflow`,
+`ciFollowupWorkflow`, `triageWorkflow`. The `config.workflow.useEngine` flag (default
+**off**) decides whether `AutofixOrchestrator` delegates to the engine or runs its
+legacy hand-rolled path.
+
+**The job queue + cockpit** (GUI): `jobs` → `workflow_runs` → `agent_runs` →
+`agent_run_events`, plus a `runners` table. `/api/cron/dispatch` claims jobs
+(`claim_next_job`, `FOR UPDATE SKIP LOCKED`), runs them in-process, and re-queues
+stalled ones; `/api/runner/*` is the long-poll API for self-hosted runners.
+Migrations `0007`–`0010` add these (unapplied — see `MIGRATION.md`).
+
+**Webhook receiver** (`/api/github/webhook`): GitHub App deliveries — `issues.opened`
+/ `reopened` / `edited` enqueue a deduped `triage` job; `installation` records the
+workspace's installation id. Returns 503 (no-op) until `GITHUB_APP_WEBHOOK_SECRET`
+is set; `/api/cron/triage-sweep` is the poll fallback.
+
+**Action plugin system** (`@cezar/core/actions/`, used by the CLI hub, the pipeline,
+and the GUI): every analysis capability is a self-contained module conforming to
+`ActionDefinition` (`prompt.ts` / `runner.ts` / `interactive.ts` / `index.ts`),
+registered via a side-effect import. The triage workflow reuses `bug-detector` and
+`priority`; auto-label / security / etc. are used directly. Four genuinely-orphaned
+display-only actions (`issue-check`, `release-notes`, `milestone-planner`,
+`needs-response`) are hidden from the CLI hub unless `experimental: true` — they
+stay registered, so `cezar run <id>` and the GUI are unaffected.
+
+**Store as source of truth**: the CLI's single JSON file with atomic writes; the
+GUI's Supabase tables. Zod schemas validate everything.
+
+---
+
+## Commands
+
+Monorepo (run from the repo root):
 
 ```bash
-git clone https://github.com/comerito/cezar.git
-cd cezar
-npm install
-npm run build
-npm link
+yarn build        # yarn workspaces foreach -A --topological-dev run build
+yarn test         # all workspaces
+yarn typecheck    # all workspaces
+yarn lint         # all workspaces
+
+yarn workspace @cezar/core   run test       # core unit tests (vitest)
+yarn workspace cezar         run build      # build the CLI
+yarn workspace @cezar/runner run build      # build the runner daemon
+yarn workspace @cezar/gui    run build      # Next.js build
+yarn dev                                    # tsx watch the CLI
 ```
 
-## Quick Start
+CLI verbs (after `yarn workspace cezar run build`, optionally `npm link`):
 
 ```bash
-# Set your tokens
-cp .env.example .env
-# Edit .env with your real tokens
-
-# Launch Cezar
-cezar
+cezar                                     # interactive hub (runs the setup wizard on first launch)
+cezar init -o <owner> -r <repo>           # bootstrap the store without the wizard
+cezar sync                                # incremental fetch
+cezar status                              # store summary
+cezar run <action> [--apply|--dry-run] [--no-interactive] [--format json]
+cezar runs [id]                           # list / inspect local workflow-engine runs
+cezar pipeline [--autofix --apply]        # full pipeline: detection → enrichment → optional autofix
 ```
 
-That's it. On first launch Cezar walks you through a setup wizard — enter your org and repo, and it handles the rest: fetching issues, generating AI digests, and dropping you into the interactive hub.
+`@cezar/runner`:
 
-```
-  Welcome! Let's connect to your GitHub repo.
-
-? GitHub owner (org or username): your-org
-? Repository name: your-repo
-? Include closed issues? No
-
-✔ Fetched 143 issues from your-org/your-repo
-  143 issues stored
-✔ Digested 143/143 issues
-  Categories: 71 bugs · 38 features · 14 docs · 20 others
-
-  Setup complete!
+```bash
+cezar-runner login                        # checks whether `claude` / `codex` are installed & logged in
+cezar-runner start --url https://<cezar> --token <token> --backends claude-cli,codex-cli
 ```
 
-From the hub you can sync with GitHub, run any action, and review results — all without leaving the app.
+---
 
-## Actions
+## Environment variables
 
-Cezar ships with 14 analysis actions organized into four groups:
+The full list (with which step needs each) is in **[`MIGRATION.md`](./MIGRATION.md)**.
+The key ones:
 
-### Triage
+| Var | For |
+|---|---|
+| `GITHUB_TOKEN` | GitHub API (CLI / OAuth fallback) |
+| `ANTHROPIC_API_KEY` | Claude API — digests, agent runs on the managed path |
+| `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_WEBHOOK_SECRET` | the GitHub App (webhooks + short-lived install tokens); additive — OAuth login is unchanged |
+| `CEZAR_USE_WORKFLOW_ENGINE` | `true` flips the workflow engine on globally (or set `workflow.useEngine` per workspace / in `.issuemanagerrc.json`) |
+| `CRON_SECRET` | bearer check shared by all cron routes incl. `/api/cron/dispatch` and `/api/cron/triage-sweep` |
+| `CEZAR_RUNNER_URL` / `CEZAR_RUNNER_TOKEN` | the self-hosted runner |
+| Supabase + `NEXT_PUBLIC_APP_URL` (GUI) | see `MIGRATION.md` |
 
-| Action | Description | Powered by |
-|---|---|---|
-| 🔍 **Find Duplicates** | Detect issues describing the same problem | Claude AI |
-| 🏷️ **Auto-Label Issues** | Suggest and apply labels based on issue content | Claude AI |
-| ❓ **Request Missing Info** | Detect bug reports missing critical info and draft follow-up comments | Claude AI |
-| 🔁 **Recurring Questions** | Find questions already answered in closed issues | Claude AI |
-| 🧹 **Stale Issue Cleanup** | Review and resolve issues with no recent activity | Claude AI |
-| ✅ **Done Detector** | Find open issues likely resolved by merged PRs | Claude AI |
+The CLI auto-loads `.env` from the project root; env vars override config-file values.
 
-### Intelligence
+---
 
-| Action | Description | Powered by |
-|---|---|---|
-| 📊 **Priority Score** | Assign critical/high/medium/low based on impact signals | Claude AI |
-| 🔒 **Security Triage** | Scan issues for potential security implications | Claude AI |
+## Legacy CLI
 
-### Community
+The original solo-use Cezar still works exactly as before:
 
-| Action | Description | Powered by |
-|---|---|---|
-| 🌱 **Good First Issues** | Tag issues suitable for new contributors with hints | Claude AI |
-| 👋 **Welcome New Contributors** | Post personalized welcome comments to first-time contributors | Claude AI |
-| 🙋 **Claim Detector** | Find issues claimed by contributors in comments | Regex patterns |
-| 🔎 **Issue Quality Check** | Flag spam, vague, and low-quality submissions | Claude AI |
-
-### Release
-
-| Action | Description | Powered by |
-|---|---|---|
-| 📋 **Release Notes** | Generate structured release notes from closed issues | Claude AI |
-| 🗺️ **Milestone Planner** | Group open issues into logical release milestones | Claude AI |
-
-Every action follows the same interactive review pattern: analyze, present results with a summary, then let you review one-by-one (or bulk-accept/skip). If you stop partway through, unreviewed items are saved for the next run.
-
-## How It Works
-
-Cezar operates in three phases, all driven from the interactive hub:
-
-1. **Fetch** — on setup (or when you choose "Sync with GitHub"), Cezar pulls issues from the GitHub API into a local JSON store.
-2. **Digest & Comments** — Claude generates a compact summary for each issue (~80 tokens), including category, affected area, and keywords. Comments are fetched and stored for issues that have them.
-3. **Analyze** — actions run against the digests and comments. Results are persisted per-batch, so even if interrupted, partial progress is saved. When new comments arrive on a previously analyzed issue, it's automatically queued for re-analysis.
-
-### Comment-Aware Analysis
-
-Most issue managers only look at the title and body. Cezar stores and feeds issue comments into action prompts, which eliminates common false positives:
-
-- **missing-info** won't flag an issue when the author already provided repro steps in a comment
-- **duplicates** respects maintainer comments clarifying "not a duplicate"
-- **stale** recognizes active comment discussions and avoids suggesting closure
-- **priority** uses comment discussion to gauge urgency and affected user count
-- **security** checks comments for CVE references and severity clarifications
-- **claim-detector** reads stored comments directly instead of making per-issue API calls
-
-Comments are fetched incrementally during sync — only issues with new or changed comments trigger API calls.
-
-### Example: Duplicate Detection
-
-Choose "Find Duplicates" from the hub. Cezar sends compact digests and recent comments to Claude in batches — with 200 issues, the full knowledge base fits in ~16k tokens.
-
-Each duplicate group is presented for interactive review:
-
-```
-GROUP 1 of 8 ──────────────────────────────────────────
-
-  ORIGINAL   #12   Login page crashes on Safari iOS
-  DUPLICATE  #89   App broken on iPhone — can't log in
-
-  Confidence: 94%
-  Reason: Both describe Safari iOS login failure; #89 adds no new info.
-
-? What do you want to do with #89?
-❯ Mark as duplicate in store only (no GitHub change)
-  Mark as duplicate + add 'duplicate' label on GitHub
-  Skip — not a duplicate
-  Open both in browser to compare
-  Stop reviewing (keep decisions so far)
+```bash
+cezar                                # launch the interactive hub
 ```
 
-## Configuration
+The hub walks you through a setup wizard (owner / repo), fetches issues, generates
+digests, and drops you into a menu of analysis actions (duplicates, auto-label,
+priority, stale, security, …) — each with the same analyze → review-one-by-one
+pattern. `init` / `sync` / `run` / `status` are the non-interactive equivalents
+for CI. None of this needs Supabase, the GUI, or the workflow engine.
 
-Cezar uses [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig) for configuration. Create any of these files in your project root:
-
-- `.issuemanagerrc.json`
-- `.issuemanagerrc.yaml`
-- `issuemanager.config.js`
-
-Example `.issuemanagerrc.json`:
+Configuration is via [cosmiconfig](https://github.com/cosmiconfig/cosmiconfig)
+(`.issuemanagerrc.json` / `.yaml` / `issuemanager.config.js`). Example:
 
 ```json
 {
-  "github": {
-    "owner": "your-org",
-    "repo": "your-repo"
-  },
-  "llm": {
-    "model": "claude-sonnet-4-20250514",
-    "maxTokens": 4096
-  },
-  "store": {
-    "path": ".issue-store"
-  },
-  "sync": {
-    "digestBatchSize": 20,
-    "duplicateBatchSize": 30,
-    "minDuplicateConfidence": 0.80,
-    "includeClosed": false
-  }
+  "github": { "owner": "your-org", "repo": "your-repo" },
+  "llm": { "model": "claude-sonnet-4-20250514", "maxTokens": 4096 },
+  "store": { "path": ".issue-store" },
+  "sync": { "includeClosed": false },
+  "experimental": false,
+  "workflow": { "useEngine": false }
 }
 ```
 
-Cezar automatically loads a `.env` file from the project root. You can also export `GITHUB_TOKEN` and `ANTHROPIC_API_KEY` in your shell — environment variables override config file values.
+Set `experimental: true` to show the four hidden actions in the hub.
 
-## CI / Scripting
+---
 
-For automated pipelines, Cezar exposes direct commands that bypass the interactive UI:
+## Adding a new action
 
-```bash
-cezar init -o <owner> -r <repo>          # Bootstrap without the wizard
-cezar sync                                # Incremental fetch
-cezar run duplicates --no-interactive     # Run any action non-interactively
-cezar run priority --apply --format json  # Apply results + JSON output
-cezar run stale --dry-run                 # Preview without writing
-```
+Each action is a self-contained folder in `packages/core/src/actions/`. To create one:
 
-See `cezar --help` for the full flag reference.
-
-## Project Structure
-
-```
-src/
-├── index.ts                      # CLI entry point (Commander setup)
-├── commands/                     # init, sync, status, run
-├── store/
-│   ├── store.model.ts            # Zod schemas — all types derive from here
-│   └── store.ts                  # IssueStore class — all data access
-├── services/
-│   ├── github.service.ts         # Octokit wrapper
-│   ├── llm.service.ts            # Anthropic SDK wrapper
-│   └── audit.ts                  # Audit comment formatting
-├── actions/
-│   ├── action.interface.ts       # Plugin contract
-│   ├── registry.ts               # Plugin registry singleton
-│   ├── duplicates/               # Each action is self-contained:
-│   ├── auto-label/               #   prompt.ts  — LLM prompt template
-│   ├── missing-info/             #   runner.ts  — detection logic
-│   ├── recurring-questions/      #   interactive.ts — review UI
-│   ├── stale/                    #   index.ts   — registers the action
-│   ├── done-detector/
-│   ├── priority/
-│   ├── security/
-│   ├── good-first-issue/
-│   ├── contributor-welcome/
-│   ├── claim-detector/
-│   ├── quality/
-│   ├── release-notes/
-│   └── milestone-planner/
-├── ui/
-│   ├── hub.ts                    # Interactive menu
-│   ├── setup.ts                  # First-run setup wizard
-│   ├── status.ts                 # Status box renderer
-│   └── components/               # Reusable UI primitives
-└── utils/                        # Config, hashing, chunking, formatting
-```
-
-## Adding a New Action
-
-Each action is a self-contained folder in `src/actions/`. To create one:
-
-1. Create `src/actions/your-action/` with `prompt.ts`, `runner.ts`, `interactive.ts`, `index.ts`
-2. Add your analysis fields to `src/store/store.model.ts`
-3. Add a side-effect import to `src/index.ts`
+1. Create `packages/core/src/actions/your-action/` with `prompt.ts`, `runner.ts`,
+   `interactive.ts`, `index.ts`.
+2. Add your analysis fields to `packages/core/src/store/store.model.ts`.
+3. Export the runner/prompt from `packages/core/src/index.ts` and add a side-effect
+   import in `packages/cli/src/index.ts`.
 
 See any existing action folder for the full pattern.
 
+---
+
 ## License
 
-[MIT](LICENSE) &copy; [Comerito](https://github.com/comerito)
+[MIT](LICENSE) © [Comerito](https://github.com/comerito)

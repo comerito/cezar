@@ -1,0 +1,16 @@
+{
+  "crons": [
+    {
+      "path": "/api/cron/issue-sync",
+      "schedule": "*/5 * * * *"
+    },
+    {
+      "path": "/api/cron/dispatch",
+      "schedule": "* * * * *"
+    },
+    {
+      "path": "/api/cron/triage-sweep",
+      "schedule": "*/10 * * * *"
+    }
+  ]
+}

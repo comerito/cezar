@@ -1,0 +1,33 @@
+{
+  "name": "cezar",
+  "version": "0.1.5",
+  "type": "module",
+  "bin": "./dist/index.js",
+  "files": [
+    "dist"
+  ],
+  "scripts": {
+    "build": "tsc && chmod +x dist/index.js",
+    "dev": "tsx watch src/index.ts",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "typecheck": "tsc --noEmit",
+    "lint": "eslint src/"
+  },
+  "dependencies": {
+    "@cezar/core": "workspace:*",
+    "@inquirer/prompts": "^7.0.0",
+    "boxen": "^8.0.0",
+    "chalk": "^5.0.0",
+    "cli-table3": "^0.6.0",
+    "commander": "^12.0.0",
+    "dotenv": "^17.3.1",
+    "ora": "^8.0.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.0.0",
+    "tsx": "^4.0.0",
+    "typescript": "^5.4.0",
+    "vitest": "^4.0.18"
+  }
+}
