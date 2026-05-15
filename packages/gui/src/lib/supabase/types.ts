@@ -12,35 +12,7 @@ export type Json =
 
 export type WorkspaceRole = 'admin' | 'actor' | 'viewer';
 
-export type FlowStatus =
-  | 'pending'
-  | 'running'
-  | 'succeeded'
-  | 'failed'
-  | 'skipped'
-  | 'pr-opened';
-
-export type CiStatus = 'pending' | 'success' | 'failure' | 'neutral' | 'unknown';
-
-export interface CiFailedCheck {
-  name: string;
-  conclusion: string | null;
-  htmlUrl: string | null;
-  startedAt: string | null;
-  completedAt: string | null;
-}
-
-export type IssueAutofixMode = 'off' | 'notify' | 'autonomous';
-
 export type WorkflowBackend = 'anthropic-api' | 'claude-cli' | 'codex-cli';
-
-export type IssueAutofixCandidateStatus =
-  | 'pending_match'
-  | 'matched_to_pr'
-  | 'unmatched'
-  | 'notified'
-  | 'dispatched'
-  | 'resolved';
 
 // ─── Phase 3a: job queue + run/event tables ─────────────────────────────
 // Note: `@cezar/core` also exports a `WorkflowRunStatus` (the in-process engine
@@ -89,7 +61,6 @@ export interface Database {
           installation_id: string | null;
           config: Json;
           meta: Json;
-          issue_autofix_mode: IssueAutofixMode;
           auto_triage_enabled: boolean;
           autofix_enabled: boolean;
           separate_comment_per_step: boolean;
@@ -137,97 +108,6 @@ export interface Database {
         };
         Insert: Omit<Database['public']['Tables']['issues']['Row'], 'id'> & { id?: string };
         Update: Partial<Database['public']['Tables']['issues']['Insert']>;
-      };
-      flows: {
-        Row: {
-          id: string;
-          workspace_id: string;
-          actor_id: string;
-          issue_number: number;
-          status: FlowStatus;
-          mode: 'apply' | 'dry-run';
-          branch: string | null;
-          pr_url: string | null;
-          pr_number: number | null;
-          outcome: Json | null;
-          attempts: Json;
-          head_sha: string | null;
-          ci_status: CiStatus | null;
-          ci_checked_at: string | null;
-          ci_failed_checks: Json;
-          ci_attribution: Json | null;
-          ci_attribution_checked_at: string | null;
-          ci_flaky_reruns: number;
-          ci_attribution_in_progress: boolean;
-          ci_fix_attempts: number;
-          ci_fix_in_progress: boolean;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: Omit<Database['public']['Tables']['flows']['Row'], 'id' | 'created_at' | 'updated_at'> & {
-          id?: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['flows']['Insert']>;
-      };
-      flow_events: {
-        Row: {
-          id: string;
-          flow_id: string;
-          type: 'lifecycle' | 'agent';
-          payload: Json;
-          created_at: string;
-        };
-        Insert: Omit<Database['public']['Tables']['flow_events']['Row'], 'id' | 'created_at'> & {
-          id?: string;
-          created_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['flow_events']['Insert']>;
-      };
-      pull_requests: {
-        Row: {
-          id: string;
-          workspace_id: string;
-          number: number;
-          title: string;
-          body: string;
-          state: string;
-          author: string;
-          html_url: string;
-          head_sha: string | null;
-          head_ref: string | null;
-          base_ref: string | null;
-          referenced_issues: number[];
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: Omit<Database['public']['Tables']['pull_requests']['Row'], 'id' | 'created_at' | 'updated_at'> & {
-          id?: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['pull_requests']['Insert']>;
-      };
-      issue_autofix_candidates: {
-        Row: {
-          id: string;
-          workspace_id: string;
-          issue_number: number;
-          status: IssueAutofixCandidateStatus;
-          matched_pr_number: number | null;
-          matched_reason: string | null;
-          dispatched_flow_id: string | null;
-          last_checked_at: string | null;
-          created_at: string;
-          updated_at: string;
-        };
-        Insert: Omit<Database['public']['Tables']['issue_autofix_candidates']['Row'], 'id' | 'created_at' | 'updated_at'> & {
-          id?: string;
-          created_at?: string;
-          updated_at?: string;
-        };
-        Update: Partial<Database['public']['Tables']['issue_autofix_candidates']['Insert']>;
       };
       user_github_tokens: {
         Row: {

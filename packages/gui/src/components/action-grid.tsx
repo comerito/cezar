@@ -7,8 +7,8 @@ import type { ActionBadge } from '@/lib/badges';
 import { RunDrawer } from './run-drawer';
 import { cn } from './ui/cn';
 
-const GROUP_ORDER: ActionGroup[] = ['triage', 'intelligence', 'community', 'release'];
-const EXCLUDED_FROM_RUN = new Set(['autofix', 'contributor-welcome', 'release-notes', 'issue-check']);
+const GROUP_ORDER: ActionGroup[] = ['triage', 'intelligence', 'community'];
+const EXCLUDED_FROM_RUN = new Set(['autofix', 'contributor-welcome']);
 
 interface ActionGridProps {
   badges?: Record<string, ActionBadge>;

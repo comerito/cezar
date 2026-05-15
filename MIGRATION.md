@@ -8,12 +8,11 @@ This is the operator checklist for turning on the agent-cockpit refactor (branch
 
 ## What's already true (no action needed)
 
-- New code is on `feat/agent-cockpit-refactor` in 5 commits (`931b97c` phases 0–2, `3de8612` phase 3, `2d06ad1` phase 4, `c24ad83` phase 5). All builds/typechecks pass; `packages/core` is at 338/339 tests (the one failure is a pre-existing date-arithmetic flake in `tests/actions/stale/runner.test.ts`, unrelated to this work).
-- `config.workflow.useEngine` defaults **off** → `AutofixOrchestrator` runs the legacy hand-rolled path exactly as before.
-- Migrations `0007`–`0010` exist as files but are **not applied** to any database.
-- The 6 existing cron routes (`issue-sync`, `issue-match`, `issue-fix`, `ci-watch`, `ci-attribute`, `ci-fix`) and the `flows`/`flow_events` tables / the old `/flows` UI are **untouched** and still drive the current autofix loop.
-- The GitHub App webhook receiver returns `503` until `GITHUB_APP_WEBHOOK_SECRET` is set, so it's a no-op until you configure it.
-- New cron routes (`/api/cron/dispatch`, `/api/cron/triage-sweep`) are added to `packages/gui/vercel.json` — they only run when deployed; they're harmless if you don't deploy this branch yet.
+- The agent-cockpit refactor is the live path on `feat/agent-cockpit-refactor`. All builds/typechecks pass; `packages/core` is at 338/339 tests (the one failure is a pre-existing date-arithmetic flake in `tests/actions/stale/runner.test.ts`, unrelated to this work).
+- Migrations `0007`–`0011` are present as files; only `0011_retire_legacy_path.sql` is destructive (it drops the legacy tables). Apply them in order.
+- The cron routes are `/api/cron/{dispatch, triage-sweep, issue-sync}`. `dispatch` drains the `jobs` queue via `executeWorkflowJob`; `triage-sweep` enqueues triage jobs for not-yet-triaged issues; `issue-sync` is the GitHub → `issues`-table reconcile + missed-webhook safety net.
+- The cockpit (`/cockpit`, `/cockpit/[runId]`) reads `workflow_runs` / `agent_runs` / `agent_run_events` live via Supabase Realtime. The `/flows` UI is retired.
+- The GitHub App webhook receiver returns `503` until `GITHUB_APP_WEBHOOK_SECRET` is set, so it's a no-op until you configure it. It handles `issues`, `check_run`, `installation`, and `installation_repositories`.
 
 ---
 
@@ -50,6 +49,7 @@ Apply, in order, to your Supabase project (review each first):
 | `packages/gui/supabase/migrations/0008_agent_runs.sql` | `jobs`, `workflow_runs`, `agent_runs`, `agent_run_events`, `runners` tables; RLS; `touch_updated_at` triggers; best-effort Realtime publication add |
 | `packages/gui/supabase/migrations/0009_job_dispatch.sql` | `claim_next_job()` / `requeue_stalled_jobs()` RPCs (`FOR UPDATE SKIP LOCKED`) |
 | `packages/gui/supabase/migrations/0010_runner_api.sql` | `claim_next_job_for_runner()` RPC; re-defines `claim_next_job()` to only return `anthropic-api`/null jobs; `requeue_jobs_for_offline_runners()`; `touch_runner_heartbeat()` |
+| `packages/gui/supabase/migrations/0011_retire_legacy_path.sql` | **Destructive.** Drops `flows`, `flow_events`, `ci_failed_checks`, `ci_attributions`, `ci_fix_attempts`, `issue_autofix_candidates`, `pull_requests`; drops the `workspaces.issue_autofix_mode` column. Back up the legacy tables first if you need their history. |
 
 ```bash
 # whichever you use, e.g.:
@@ -57,9 +57,7 @@ supabase db push          # if linked
 # or apply each file via the SQL editor / migration tool you use
 ```
 
-`flows`/`flow_events` are left in place (no view, no backfill) — the old loop keeps working alongside. A later migration retires them once you've cut over (Phase 6).
-
-After this step the cockpit UI (`/cockpit`, `/cockpit/[runId]`), Settings → Workflows, and Settings → Runners pages render and read these tables; they'll just be empty until you run a workflow.
+After this step the cockpit UI (`/cockpit`, `/cockpit/[runId]`), Settings → Workflows, and Settings → Runners pages render against the new tables. If you're applying this against a database that has legacy data, **back up `flows` / `flow_events` first** — `0011` drops them with no backfill.
 
 ---
 
@@ -82,21 +80,15 @@ Set these in the GUI app's environment (Vercel project settings, `.env`, etc.):
 | `CEZAR_INPROCESS_CRON` | self-hosted Node deployments | set to `true` to start the in-process scheduler at server boot (see "Cron source" below). Leave unset on Vercel. |
 | `CEZAR_INPROCESS_CRON_BASE_URL` | in-process scheduler | optional — base URL the scheduler `fetch`es; defaults to `NEXT_PUBLIC_APP_URL` / `https://$VERCEL_URL` / `http://127.0.0.1:$PORT` |
 | `CEZAR_INPROCESS_CRON_DISABLED` | in-process scheduler | optional CSV of route paths to skip, e.g. `/api/cron/ci-fix,/api/cron/issue-sync` |
-| `CEZAR_INPROCESS_CRON_LEGACY` | in-process scheduler | optional — set to `false` to skip the 6 legacy cron routes (drive them externally instead). Default = run them. |
 | `CEZAR_DISPATCH_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
 | `CEZAR_TRIAGE_SWEEP_INTERVAL_MS` | in-process scheduler | optional, default `600000` (10 min) |
 | `CEZAR_CRON_ISSUE_SYNC_INTERVAL_MS` | in-process scheduler | optional, default `300000` (5 min) — matches the Vercel cadence |
-| `CEZAR_CRON_ISSUE_MATCH_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
-| `CEZAR_CRON_ISSUE_FIX_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
-| `CEZAR_CRON_CI_WATCH_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
-| `CEZAR_CRON_CI_ATTRIBUTE_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
-| `CEZAR_CRON_CI_FIX_INTERVAL_MS` | in-process scheduler | optional, default `60000` (1 min) |
 
 ### Cron source
 
-Every `/api/cron/*` route (the 2 new ones and the 6 legacy ones) needs to fire on a schedule. Pick whichever fits your deployment:
+Every `/api/cron/*` route (`dispatch`, `triage-sweep`, `issue-sync`) needs to fire on a schedule. Pick whichever fits your deployment:
 
-- **Self-hosted long-running Node** (Docker / Fly / Railway / Render / VPS — the recommended setup): set `CEZAR_INPROCESS_CRON=true`. Next 15's `instrumentation.ts` hook starts an in-process scheduler at server boot that `fetch`es every cron route on `setInterval` at the cadence matching `vercel.json` (overridable per-route via the `CEZAR_*_INTERVAL_MS` env vars). Per-route overlap guard, idempotent boot (HMR-safe), SIGTERM/SIGINT clean. Disable individual routes via `CEZAR_INPROCESS_CRON_DISABLED` (CSV of paths); turn off all legacy routes via `CEZAR_INPROCESS_CRON_LEGACY=false`. Each replica ticks independently — safe (`claim_next_job` uses `FOR UPDATE SKIP LOCKED`, the sweep and the legacy crons all dedupe) just wasteful; scale horizontally only if a single replica can't keep up.
+- **Self-hosted long-running Node** (Docker / Fly / Railway / Render / VPS — the recommended setup): set `CEZAR_INPROCESS_CRON=true`. Next 15's `instrumentation.ts` hook starts an in-process scheduler at server boot that `fetch`es every cron route on `setInterval` at the cadence matching `vercel.json` (overridable per-route via the `CEZAR_*_INTERVAL_MS` env vars). Per-route overlap guard, idempotent boot (HMR-safe), SIGTERM/SIGINT clean. Disable individual routes via `CEZAR_INPROCESS_CRON_DISABLED` (CSV of paths). Each replica ticks independently — safe (`claim_next_job` uses `FOR UPDATE SKIP LOCKED`, the sweep and `issue-sync` upsert idempotently) just wasteful; scale horizontally only if a single replica can't keep up.
 - **Vercel**: leave `CEZAR_INPROCESS_CRON` unset and let the `vercel.json` schedules drive every route.
 - **External cron** (cron-job.org, GitHub Actions schedule, OS crontab, Kubernetes `CronJob`, …): leave `CEZAR_INPROCESS_CRON` unset and hit each route on its own schedule with `Authorization: Bearer $CRON_SECRET`.
 
@@ -129,28 +121,27 @@ Bindings are stored in `workflow_bindings` and merged into the workspace config 
 
 ## Step 6 — Flip the workflow engine on (the cutover)
 
-Two ways:
+The SaaS path (`/api/cron/dispatch` + `executeWorkflowJob`) always runs the declarative `Workflow` engine — no flag. For the local CLI:
 
-- **Global:** set `CEZAR_USE_WORKFLOW_ENGINE=true`. Every workspace's autofix runs through the declarative `Workflow` engine.
-- **Per-workspace (recommended for rollout):** set `useEngine: true` inside the workspace's `config` JSONB under `workflow` (or in `.issuemanagerrc.json` → `workflow.useEngine` for the local CLI). Roll it out one workspace at a time.
+- Default behavior is the legacy hand-rolled `AutofixOrchestrator` path.
+- Opt into the engine for a CLI repo by setting `workflow.useEngine: true` in `.issuemanagerrc.json` (or `CEZAR_USE_WORKFLOW_ENGINE=true`). The CLI's `runs` directory under `.cezar/runs/` will then mirror each run's summary.
 
-When the flag is on:
+When the engine drives a run:
 - `AutofixOrchestrator.processIssue` / `processCiFollowup` delegate to `runWorkflow(autofixWorkflow | ciFollowupWorkflow)`; the outcome is translated back to the legacy `OrchestratorOutcome` shape, so the existing callers don't change.
 - A `workflow_runs` row + per-step `agent_runs` + a streamed `agent_run_events` log are written for each run → the **cockpit** (`/cockpit`) shows it live (Realtime).
 - The run posts **one living comment** on the issue (edited as steps complete), then one on the PR — unless `separate_comment_per_step` is on.
 - A `human-gate` step pauses the run for a cockpit decision when confidence is below the threshold.
 
-When the flag is off → byte-identical to today.
-
-**Test it:** flip it on for one workspace, open the cockpit, and either click "Run workflow" on the cockpit / an issue, or `enqueueWorkflowRun`, or let the existing `issue-fix` cron dispatch one (it goes through `run-orchestrator.ts`, which honors the flag). Watch the step-graph + event log fill in.
+**Test it:** open `/cockpit`, click the per-issue "Fix" button on `/issues` (it enqueues an `autofix` job via the new server action), and watch the step-graph + event log fill in as `/api/cron/dispatch` claims it.
 
 ---
 
 ## Step 7 — Webhooks & auto-triage
 
-- With Step 4 done, `issues.opened` / `reopened` / `edited` webhooks enqueue a deduped `triage` job for the matching workspace **when `auto_triage_enabled`** (default on). The `/api/cron/dispatch` cron (or a runner) picks it up and runs `triageWorkflow` → posts a triage summary comment, applies a couple of labels, and records `route` / `issueType` / `bugConfidence` / `priority` in the run outcome.
-- If `route === 'autofix'` **and** the workspace has `autofix_enabled` (default **off**) **and** `issueType === 'bug'` **and** `bugConfidence ≥ config.autofix.minBugConfidence` (default 0.7) → an `autofix` job is enqueued automatically. Otherwise it just leaves the triage summary. (Below-threshold triage-driven runs don't pause for approval yet — that's a Phase 6 follow-up; the threshold is the gate.)
-- `/api/cron/triage-sweep` is the poll fallback for installs without webhooks / missed deliveries.
+- With Step 4 done, `issues.opened` / `reopened` / `edited` webhooks enqueue a deduped `triage` job for the matching workspace **when `auto_triage_enabled`** (default on). The `/api/cron/dispatch` cron (or a runner) picks it up and runs `triageWorkflow` → posts a triage summary comment, applies a couple of labels (`bug`/`enhancement`/`question` + `priority:*` + `needs-info`/`invalid`/`duplicate` as appropriate), and records `route` / `issueType` / `bugConfidence` / `priority` / `bugReason` / `priorityReason` / `duplicateOf` in the run outcome **and** the issue's `analysis` JSON.
+- If `route === 'autofix'` **and** the workspace has `autofix_enabled` (default **off**) **and** `issueType === 'bug'` **and** `bugConfidence ≥ config.autofix.minBugConfidence` (default 0.7) → an `autofix` job is enqueued automatically. Otherwise it just leaves the triage summary. (Below-threshold triage-driven runs don't pause for approval yet — see "Still deferred" in Step 9.)
+- `check_run.completed` with a failing conclusion on a PR that an autofix run opened → enqueues a `ci-followup` job (capped at 3 prior attempts, deduped against open jobs). The `ciFollowupWorkflow.attribute` step consumes the seed carrying the failed check name(s); the fix step then commits + pushes back to the same PR branch.
+- `/api/cron/triage-sweep` is the missed-webhook poll fallback (enqueues triage jobs for in-store-but-not-yet-triaged issues); `/api/cron/issue-sync` is the GitHub → `issues`-table reconcile (backfill + missed webhooks).
 - Toggle `auto_triage_enabled` / `autofix_enabled` / `separate_comment_per_step` in **Settings → General → Automation** (admin only; turning on `autofix_enabled` shows a "Cezar will open draft PRs automatically" warning). PRs are always **draft**.
 
 ---
@@ -175,42 +166,41 @@ The runner long-polls `/api/runner/jobs`, claims jobs whose `required_backend` i
 
 ---
 
-## Step 9 — Phase 6 (partially done — the safe parts; the rest is deferred until live)
+## Step 9 — Phase 6 cleanup (cutover landed)
 
-Phase 6 is the cleanup phase, deliberately split: the **safe, additive parts are
-done now** (committed on `feat/agent-cockpit-refactor`); everything that deletes or
-re-wires working code is **deferred until the new path is proven on real traffic**.
+The legacy `flows`-backed path is retired. Everything below has already shipped
+on `feat/agent-cockpit-refactor`; apply migration `0011_retire_legacy_path.sql`
+once and your database matches the code.
 
 ### Done in Phase 6
 
 - **`README.md` / `CLAUDE.md`** rewritten around the cockpit + skills + workflow model (this doc is the activation runbook they point to).
-- **`config.experimental`** flag added; the four genuinely-orphaned display-only actions (`issue-check`, `release-notes`, `milestone-planner`, `needs-response`) are **hidden from the CLI hub** unless `experimental: true` — they stay registered (`cezar run <id>` and the GUI are unaffected). Nothing was deleted. (`docs/audit/02-DELETION-CANDIDATES.md` updated with a "partly superseded" note.)
-- **`cezar runs`** CLI command — lists / inspects local workflow-engine runs written to `<store dir>/.cezar/runs/*.json` (the CLI's autofix path mirrors a per-run summary there when `workflow.useEngine` is on). The web cockpit (`/cockpit`) is the SaaS equivalent.
-- The `TODO(phase-3c)` dedupe marker in `execute-workflow-job.ts` was re-pointed to `TODO(phase-6, after live cutover)` (see below).
+- **Retired the legacy crons**: `/api/cron/{issue-match, issue-fix, ci-watch, ci-attribute, ci-fix}` deleted; `vercel.json` and the in-process scheduler updated. `issue-sync` is kept as the GitHub → `issues`-table reconcile + missed-webhook safety net (now broader: upserts every open issue, not just bug-labeled). `dispatch` + `triage-sweep` drive the new path.
+- **Deleted the legacy UI + glue**: the entire `packages/gui/src/app/flows/` directory, `packages/gui/src/lib/run-orchestrator.ts`, `packages/gui/src/lib/adapters/event-bridge.ts`, `packages/gui/src/lib/adapters/web-confirm.ts`, the sidebar `/flows` link, and the `Issues → Loop` column / `ActivateButton`. The dashboard's `AutofixLoopCard` is gone.
+- **Rewired all dashboard/activity/analytics readers** off `flows`/`flow_events`/`ci_*`/`issue_autofix_candidates` onto `workflow_runs` / `agent_run_events`. Activity links to `/cockpit/[runId]` instead of `/flows/cockpit/[flowId]`.
+- **`0011_retire_legacy_path.sql`** drops `flows`, `flow_events`, `ci_failed_checks`, `ci_attributions`, `ci_fix_attempts`, `issue_autofix_candidates`, `pull_requests`, and `workspaces.issue_autofix_mode`. No backfill — the cockpit's run history starts at the cutover.
+- **Deleted the 4 display-only orphan actions** (`issue-check`, `release-notes`, `milestone-planner`, `needs-response`) and the `config.experimental` flag they hid behind. Their analysis-schema fields + `needsResponseBatchSize` config field are gone too.
+- **`cezar runs`** CLI command lists / inspects local workflow-engine runs written to `<store dir>/.cezar/runs/*.json`. The web cockpit (`/cockpit`) is the SaaS equivalent.
+- **Real `dedupe-check` triage step** — replaced the placeholder with an LLM call against the open-issue knowledge base (capped to 50 most-recent digested issues; effect steps now get a `store` dep). Also wired `needs-info` / `ignore` route handling: `needs-info` adds the `needs-info` label and prompts for repro details; `ignore` adds `invalid`; any detected duplicate adds `duplicate`.
+- **`persist-workflow-run.ts`** helper extracts the shared `workflow_runs`/`agent_runs`/`agent_run_events` persistence. `execute-workflow-job.ts` builds one persister per run.
+- **`check_run` webhook handler** wired: a failing `check_run.completed` on an autofix-owned PR (matched via `workflow_runs.pr_number`) enqueues a `ci-followup` job, capped at 3 prior attempts, deduped against open jobs. The `ciFollowupWorkflow.attribute` step still consumes the seed verbatim — a future iteration replaces the seed's static reasoning with a real LLM attribution call before enqueueing.
 
-### Deferred — do after the live cutover
+### Still deferred
 
-These delete or re-wire code that's still live; validate the new path on your traffic first.
-
-- **Retire the 6 old cron routes** (`issue-sync`, `issue-match`, `issue-fix`, `ci-watch`, `ci-attribute`, `ci-fix`) and the `flows`/`flow_events` tables / the `/flows` UI; add a `0011_*.sql` that backfills `flows` → `workflow_runs`.
-- **CI-followup-via-webhook re-wiring**: implement the `check_run` webhook handler (currently a deliberate no-op) and the `ciFollowupWorkflow.attribute` step properly, then wire CI-followup persistence through `execute-workflow-job.ts` / the runner (replacing the retired `ci-fix` path).
-- **Dedupe `run-orchestrator.ts` ↔ `execute-workflow-job.ts`**: extract the shared `agent_runs`/`agent_run_events`/`workflow_runs` persistence into a `persist-workflow-run.ts` helper; both call it. Deferred so the still-live `flows`-backed `/flows` UI that `run-orchestrator.ts` drives isn't disturbed.
-- **Run the action-deletion list** (`docs/audit/02-DELETION-CANDIDATES.md`) — drop or downgrade the orphaned actions to optional triage skills. (Stale: `bug-detector`/`priority` are now used by `triageWorkflow`; the rest are actively used.)
-- **CLI ↔ core convergence**: full `.cezar/`-backed equivalents for bindings (the `runs` mirror is the first slice) so the solo CLI path doesn't bit-rot.
-- **Smaller `TODO(phase-5)` items**: a real `dedupe-check` triage step (needs the open-issue knowledge base), `needs-info` / `ignore` route handling, a triage-driven `human-gate` for below-threshold autofix candidates.
 - **Codex `phase-4-verify`**: do one live `codex exec --json` run and confirm the structured-output + usage schema in `CodexCliRunner` matches before depending on it.
+- **Triage-driven `human-gate`** for below-threshold autofix candidates (today they just don't enqueue).
+- **CLI ↔ core full convergence**: `.cezar/`-backed equivalents for bindings (today only `runs` is mirrored).
 
 ---
 
 ## Rollback
 
-Everything above is opt-in and individually reversible:
+The cutover is now baked in — `flows` is gone, `run-orchestrator.ts` is gone, the
+4 orphan actions are gone. Reverting means rolling back commits, not flipping a
+flag. The non-destructive levers that remain:
 
-- **Engine:** unset `CEZAR_USE_WORKFLOW_ENGINE` and/or remove `workflow.useEngine` from workspace configs → autofix is back on the legacy path immediately.
 - **Webhooks / auto-triage:** unset `GITHUB_APP_WEBHOOK_SECRET` (receiver returns 503) and/or set `auto_triage_enabled = false` per workspace. Uninstall the GitHub App if you want repo ops back on OAuth.
-- **Cron routes:** remove the `/api/cron/dispatch` and `/api/cron/triage-sweep` entries from `vercel.json` (the route files are inert without a schedule and without queued jobs).
+- **Cron routes:** remove the `vercel.json` entries (`dispatch` / `triage-sweep` / `issue-sync`) if you want the SaaS path quiet; the route files stay inert.
 - **Runners:** revoke the token in Settings → Runners; stop the daemon.
-- **Migrations:** `0007`–`0010` are additive (new tables/columns/RPCs). `0010` re-defines `claim_next_job()` to filter to `anthropic-api`/null — if you want the pre-`0010` behavior back, re-run the `0009` definition of that function. Dropping the new tables is safe if nothing has written to them.
-- **Code:** `git revert` the relevant phase commits, or simply don't merge the branch.
-
-The old autofix loop and `flows` UI are untouched throughout, so reverting never strands in-flight work on the old path.
+- **Migrations:** `0011_retire_legacy_path.sql` is destructive (`DROP TABLE`). If you need to roll it back you have to restore those tables from a backup taken before applying it — there is no auto-restore. `0007`–`0010` remain additive.
+- **Code:** `git revert` the relevant cleanup commits to restore the legacy path wholesale.

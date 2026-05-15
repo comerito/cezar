@@ -32,7 +32,6 @@ interface CronJob {
 
 // Defaults mirror `packages/gui/vercel.json` cadences.
 const JOBS: CronJob[] = [
-  // — Phase 3+ (new) crons —
   {
     path: '/api/cron/dispatch',
     defaultIntervalMs: 60_000,
@@ -55,13 +54,11 @@ const JOBS: CronJob[] = [
       return null;
     },
   },
-  // — Legacy crons (driven here so non-Vercel hosts don't need external cron until retirement) —
-  { path: '/api/cron/issue-sync',    defaultIntervalMs: 300_000, envOverride: 'CEZAR_CRON_ISSUE_SYNC_INTERVAL_MS' },
-  { path: '/api/cron/issue-match',   defaultIntervalMs:  60_000, envOverride: 'CEZAR_CRON_ISSUE_MATCH_INTERVAL_MS' },
-  { path: '/api/cron/issue-fix',     defaultIntervalMs:  60_000, envOverride: 'CEZAR_CRON_ISSUE_FIX_INTERVAL_MS' },
-  { path: '/api/cron/ci-watch',      defaultIntervalMs:  60_000, envOverride: 'CEZAR_CRON_CI_WATCH_INTERVAL_MS' },
-  { path: '/api/cron/ci-attribute',  defaultIntervalMs:  60_000, envOverride: 'CEZAR_CRON_CI_ATTRIBUTE_INTERVAL_MS' },
-  { path: '/api/cron/ci-fix',        defaultIntervalMs:  60_000, envOverride: 'CEZAR_CRON_CI_FIX_INTERVAL_MS' },
+  {
+    path: '/api/cron/issue-sync',
+    defaultIntervalMs: 300_000,
+    envOverride: 'CEZAR_CRON_ISSUE_SYNC_INTERVAL_MS',
+  },
 ];
 
 interface SchedulerState {
@@ -113,13 +110,10 @@ export function startInProcessScheduler(): void {
   const baseUrl = resolveBaseUrl();
   const secret = process.env.CRON_SECRET;
   const disabled = disabledPaths();
-  const skipLegacy = process.env.CEZAR_INPROCESS_CRON_LEGACY === 'false';
 
-  const active = JOBS.filter((j) => {
-    if (disabled.has(j.path)) return false;
-    if (skipLegacy && j.path !== '/api/cron/dispatch' && j.path !== '/api/cron/triage-sweep') return false;
-    return true;
-  }).map((j) => ({ job: j, intervalMs: Number(process.env[j.envOverride]) || j.defaultIntervalMs }));
+  const active = JOBS
+    .filter((j) => !disabled.has(j.path))
+    .map((j) => ({ job: j, intervalMs: Number(process.env[j.envOverride]) || j.defaultIntervalMs }));
 
   const summary = active.map((a) => `${a.job.path}@${a.intervalMs}ms`).join(', ');
   console.log(`[scheduler] starting — base ${baseUrl}; ${active.length} job(s): ${summary || '(none)'}`);

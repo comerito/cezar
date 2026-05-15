@@ -1,10 +1,11 @@
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { AgentRunRecord, CiFollowupInput } from '@cezar/core';
+import type { CiFollowupInput } from '@cezar/core';
 import { SupabaseStoreAdapter } from './adapters/supabase-store';
 import { loadWorkspaceConfig } from './load-workspace-config';
 import { maybeEnqueueAutofixFromTriage } from './maybe-enqueue-autofix-from-triage';
+import { createWorkflowRunPersister, type WorkflowRunPersister } from './persist-workflow-run';
 import { ensureRepoClone } from './repo-clone';
-import type { Database, AgentRunEventType } from './supabase/types';
+import type { Database } from './supabase/types';
 
 type WorkflowKind = 'autofix' | 'ci-followup' | 'triage';
 
@@ -21,8 +22,6 @@ export interface ExecuteWorkflowJobParams {
   ciFollowupSeed?: CiFollowupInput;
 }
 
-type AgentRunsRow = Database['public']['Tables']['agent_runs']['Row'];
-
 /**
  * Phase 3c — the single "run a workflow via the engine + persist
  * workflow_runs / agent_runs / agent_run_events" code path. Used by the
@@ -36,25 +35,19 @@ type AgentRunsRow = Database['public']['Tables']['agent_runs']['Row'];
  * can be killed mid-run. The watchdog (`requeue_stalled_jobs`) re-queues such
  * jobs; the proper long-running runner is Phase 4.
  *
- * TODO(phase-6, after live cutover): dedupe run-orchestrator.ts engine branch
- * with this helper — extract the shared `agent_runs`/`agent_run_events`/`workflow_runs`
- * persistence into `persist-workflow-run.ts`. Deferred in Phase 6 to avoid disturbing
- * the still-live flows-backed `/flows` UI that `run-orchestrator.ts` also drives.
+ * Persistence (`workflow_runs` / `agent_runs` / `agent_run_events`) flows
+ * through {@link createWorkflowRunPersister}.
  */
 export async function executeWorkflowJob(
   adminSupabase: SupabaseClient<Database>,
   params: ExecuteWorkflowJobParams,
 ): Promise<void> {
   const { workspaceId, workflow, issueNumber, prNumber, jobId, ciFollowupSeed } = params;
-  let workflowRunId: string | null = null;
+  let persister: WorkflowRunPersister | null = null;
 
   const finishJob = async (status: Database['public']['Tables']['jobs']['Row']['status']): Promise<void> => {
     if (!jobId) return;
     await adminSupabase.from('jobs').update({ status, updated_at: new Date().toISOString() }).eq('id', jobId);
-  };
-  const finishRunRow = async (patch: Database['public']['Tables']['workflow_runs']['Update']): Promise<void> => {
-    if (!workflowRunId) return;
-    await adminSupabase.from('workflow_runs').update(patch).eq('id', workflowRunId);
   };
 
   try {
@@ -104,92 +97,32 @@ export async function executeWorkflowJob(
     const runIssueNumber = workflow === 'ci-followup' ? ciFollowupSeed?.issueNumber ?? issueNumber : issueNumber;
     if (runIssueNumber == null) throw new Error(`workflow '${workflow}' job has no issue_number`);
 
-    // ── workflow_runs row ──
-    {
-      const { data, error } = await adminSupabase
-        .from('workflow_runs')
-        .insert({
-          workspace_id: workspaceId,
-          job_id: jobId ?? null,
-          workflow,
-          repo: repoSlug,
-          issue_number: runIssueNumber,
-          pr_number: prNumber ?? ciFollowupSeed?.prNumber ?? null,
-          status: 'running',
-          started_at: new Date().toISOString(),
-        })
-        .select('id')
-        .single();
-      if (error) throw new Error(`workflow_runs insert failed: ${error.message}`);
-      workflowRunId = data?.id ?? null;
-    }
+    // ── workflow_runs row + persistence (the shared persister) ──
+    persister = await createWorkflowRunPersister(adminSupabase, {
+      workspaceId,
+      jobId,
+      workflow,
+      repo: repoSlug,
+      issueNumber: runIssueNumber,
+      prNumber: prNumber ?? ciFollowupSeed?.prNumber ?? null,
+      onPersistError: (label, err) =>
+        console.error(`[dispatch] persist ${label} failed:`, err instanceof Error ? err.message : err),
+    });
+    if (!persister.id) throw new Error('workflow_runs insert failed');
 
     // ── persistence callbacks ──
-    const safe = async (label: string, fn: () => Promise<void>): Promise<void> => {
-      try { await fn(); } catch (err) {
-        console.error(`[dispatch] persist ${label} failed:`, err instanceof Error ? err.message : err);
-      }
-    };
-    const recordEvent = (type: AgentRunEventType, payload: unknown, agentRunId?: string | null): void => {
-      if (!workflowRunId) return;
-      void safe(`event:${type}`, async () => {
-        await adminSupabase.from('agent_run_events').insert({
-          workspace_id: workspaceId,
-          workflow_run_id: workflowRunId!,
-          agent_run_id: agentRunId ?? null,
-          type,
-          payload: payload as Database['public']['Tables']['agent_run_events']['Row']['payload'],
-        });
-      });
-    };
-    const onEvent = (msg: string): void => recordEvent('lifecycle', { message: msg });
+    const onEvent = (msg: string): void => { void persister!.recordEvent('lifecycle', { message: msg }); };
     const onAgentEvent = (evt: { type: string; [k: string]: unknown }): void => {
-      // Mirrors run-orchestrator.ts — the orchestrator/engine path emits the
-      // legacy agent-session event shape here.
-      if (evt.type === 'text') recordEvent('agent-text', { text: evt.text });
-      else if (evt.type === 'tool') recordEvent('tool-call', { tool: evt.tool, input: evt.input });
-      else if (evt.type === 'tool-result') recordEvent('tool-result', { toolUseId: evt.toolUseId, result: evt.result, isError: evt.isError });
-      else recordEvent('note', evt);
+      // The orchestrator/engine path emits the legacy agent-session event
+      // shape here; map it onto agent_run_events rows.
+      if (evt.type === 'text') void persister!.recordEvent('agent-text', { text: evt.text });
+      else if (evt.type === 'tool') void persister!.recordEvent('tool-call', { tool: evt.tool, input: evt.input });
+      else if (evt.type === 'tool-result') void persister!.recordEvent('tool-result', { toolUseId: evt.toolUseId, result: evt.result, isError: evt.isError });
+      else void persister!.recordEvent('note', evt);
     };
-    const onRunRecord = (r: AgentRunRecord): void => {
-      void safe('agent_runs insert', async () => {
-        if (!workflowRunId) return;
-        const { data, error } = await adminSupabase
-          .from('agent_runs')
-          .insert({
-            workspace_id: workspaceId,
-            workflow_run_id: workflowRunId,
-            step_id: r.stepId,
-            iteration: r.iteration,
-            kind: (r.kind ?? null) as AgentRunsRow['kind'],
-            backend: r.backend,
-            model: r.model,
-            status: r.status === 'running' ? 'running' : r.status,
-            started_at: r.startedAt,
-            finished_at: r.finishedAt ?? null,
-            tokens_used: r.tokensUsed,
-            summary: r.summary ?? null,
-            error: r.error ?? null,
-          })
-          .select('id')
-          .single();
-        if (error) throw error;
-        recordEvent('step-end', { stepId: r.stepId, iteration: r.iteration, status: r.status, summary: r.summary, error: r.error }, data?.id);
-        await adminSupabase.from('workflow_runs').update({ current_step_id: r.stepId }).eq('id', workflowRunId);
-      });
-    };
-
-    // Probes the workflow_runs row between steps.
-    const pauseRequested = async (): Promise<boolean> => {
-      if (!workflowRunId) return false;
-      const { data } = await adminSupabase.from('workflow_runs').select('pause_requested').eq('id', workflowRunId).single();
-      return data?.pause_requested === true;
-    };
-    const cancelRequested = async (): Promise<boolean> => {
-      if (!workflowRunId) return false;
-      const { data } = await adminSupabase.from('workflow_runs').select('status').eq('id', workflowRunId).single();
-      return data?.status === 'cancelled';
-    };
+    const onRunRecord = (r: import('@cezar/core').AgentRunRecord): void => { void persister!.recordAgentRun(r); };
+    const pauseRequested = () => persister!.isPauseRequested();
+    const cancelRequested = () => persister!.isCancelled();
 
     // ── run ──
     type RunStatus = 'succeeded' | 'failed' | 'paused' | 'cancelled';
@@ -269,6 +202,27 @@ export async function executeWorkflowJob(
       reason = result.reason;
       tokensUsed = result.tokensUsed;
       if (runStatus === 'succeeded') {
+        // Persist the triage classification back to the issue's analysis so the
+        // follow-up autofix dispatch — which loads the store fresh and gates on
+        // `issue.analysis.issueType === 'bug'` (and `bugConfidence ≥ threshold`)
+        // in `AutofixOrchestrator.processIssueViaEngine` — actually proceeds.
+        // Without this, every triage→autofix handoff short-circuits as
+        // "not classified as a bug" with 0 steps. Must save BEFORE enqueueing.
+        try {
+          const nowIso = new Date().toISOString();
+          store.setAnalysis(runIssueNumber, {
+            issueType: triageOutcome.issueType,
+            bugConfidence: triageOutcome.bugConfidence,
+            bugReason: triageOutcome.bugReason,
+            bugAnalyzedAt: nowIso,
+            priority: triageOutcome.priority,
+            priorityReason: triageOutcome.priorityReason,
+            priorityAnalyzedAt: triageOutcome.priority ? nowIso : null,
+          });
+          await store.save();
+        } catch (err) {
+          console.error('[dispatch] persist triage analysis failed:', err instanceof Error ? err.message : err);
+        }
         await maybeEnqueueAutofixFromTriage(adminSupabase, {
           workspaceId,
           repo: repoSlug,
@@ -281,12 +235,12 @@ export async function executeWorkflowJob(
 
     // The engine path doesn't surface tokensUsed through the autofix outcome,
     // but the run records do; sum them as a best-effort total when unknown.
-    if (tokensUsed === 0 && workflowRunId) {
-      const { data: runs } = await adminSupabase.from('agent_runs').select('tokens_used').eq('workflow_run_id', workflowRunId);
+    if (tokensUsed === 0 && persister.id) {
+      const { data: runs } = await adminSupabase.from('agent_runs').select('tokens_used').eq('workflow_run_id', persister.id);
       tokensUsed = (runs ?? []).reduce((s, r) => s + (r.tokens_used ?? 0), 0);
     }
 
-    await finishRunRow({
+    await persister.finalize({
       status: runStatus,
       outcome: outcomeJson as Database['public']['Tables']['workflow_runs']['Row']['outcome'],
       reason: reason ?? null,
@@ -308,7 +262,7 @@ export async function executeWorkflowJob(
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);
     console.error('[dispatch] executeWorkflowJob failed:', message);
-    await finishRunRow({ status: 'failed', reason: message, finished_at: new Date().toISOString() }).catch(() => {});
+    if (persister) await persister.fail(message).catch(() => {});
     await finishJob('failed').catch(() => {});
   }
 }

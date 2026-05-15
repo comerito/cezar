@@ -5,16 +5,23 @@ export const dynamic = 'force-dynamic';
 export const runtime = 'nodejs';
 
 // Cap per-tick work so one oversized repo can't blow the cron timeout.
-// Bug-labeled open issues are usually a short list, but PR volume can spike.
 const MAX_WORKSPACES_PER_TICK = 10;
 
 type Workspace = {
   id: string;
   repo_owner: string;
   repo_name: string;
-  issue_autofix_mode: 'off' | 'notify' | 'autonomous';
 };
 
+/**
+ * GitHub → store reconcile cron. The webhook receiver covers new-issue events
+ * in real time; this cron is the backfill + missed-delivery safety net (and
+ * the only way an existing-issue backlog reaches the store at all).
+ *
+ * Pulls open issues, upserts them into the `issues` table. Per-workspace
+ * gated by `auto_triage_enabled` (same flag as the triage-sweep poll). The
+ * dispatcher + triage workflow then take over from there.
+ */
 export async function GET(req: Request) {
   const expected = process.env.CRON_SECRET;
   if (expected) {
@@ -28,8 +35,8 @@ export async function GET(req: Request) {
 
   const { data: workspaces, error } = await supabase
     .from('workspaces')
-    .select('id, repo_owner, repo_name, issue_autofix_mode')
-    .neq('issue_autofix_mode', 'off')
+    .select('id, repo_owner, repo_name')
+    .eq('auto_triage_enabled', true)
     .limit(MAX_WORKSPACES_PER_TICK);
 
   if (error) {
@@ -61,7 +68,7 @@ async function syncOne(
   ws: Workspace,
   supabase: ReturnType<typeof createSupabaseAdminClient>,
   core: typeof import('@cezar/core'),
-): Promise<{ workspaceId: string; ok: true; bugs: number; prs: number; newCandidates: number }> {
+): Promise<{ workspaceId: string; ok: true; issues: number }> {
   const token = await resolveWorkspaceToken(ws.id, supabase);
   if (!token) throw new Error('no github token available for workspace');
 
@@ -69,17 +76,10 @@ async function syncOne(
     github: { owner: ws.repo_owner, repo: ws.repo_name, token },
   } as any);
 
-  const [openIssues, openPRs] = await Promise.all([
-    github.fetchAllIssues(false),
-    github.listOpenPullRequests(),
-  ]);
+  const openIssues = await github.fetchAllIssues(false);
 
-  // Upsert bug-labeled issues. Non-bug issues are ignored — the loop only
-  // cares about the bug list, and full sync already has its own path.
-  const bugIssues = openIssues.filter(i => i.labels.includes('bug'));
-
-  if (bugIssues.length > 0) {
-    const rows = bugIssues.map(i => ({
+  if (openIssues.length > 0) {
+    const rows = openIssues.map(i => ({
       workspace_id: ws.id,
       number: i.number,
       title: i.title,
@@ -99,52 +99,10 @@ async function syncOne(
     if (upsertErr) throw new Error(`issues upsert failed: ${upsertErr.message}`);
   }
 
-  if (openPRs.length > 0) {
-    const prRows = openPRs.map(p => ({
-      workspace_id: ws.id,
-      number: p.number,
-      title: p.title,
-      body: p.body,
-      state: p.state,
-      author: p.author,
-      html_url: p.htmlUrl,
-      head_sha: p.headSha,
-      head_ref: p.headRef,
-      base_ref: p.baseRef,
-      referenced_issues: p.referencedIssues,
-    }));
-    const { error: prErr } = await supabase
-      .from('pull_requests')
-      .upsert(prRows as any, { onConflict: 'workspace_id,number' });
-    if (prErr) throw new Error(`pull_requests upsert failed: ${prErr.message}`);
-  }
-
-  // Seed candidate rows for bug issues that don't have one yet.
-  // onConflict do-nothing via upsert with ignoreDuplicates.
-  let newCandidates = 0;
-  if (bugIssues.length > 0) {
-    const candidateRows = bugIssues.map(i => ({
-      workspace_id: ws.id,
-      issue_number: i.number,
-      status: 'pending_match' as const,
-    }));
-    const { data: inserted, error: candErr } = await supabase
-      .from('issue_autofix_candidates')
-      .upsert(candidateRows as any, {
-        onConflict: 'workspace_id,issue_number',
-        ignoreDuplicates: true,
-      })
-      .select('id');
-    if (candErr) throw new Error(`candidates upsert failed: ${candErr.message}`);
-    newCandidates = inserted?.length ?? 0;
-  }
-
   return {
     workspaceId: ws.id,
     ok: true,
-    bugs: bugIssues.length,
-    prs: openPRs.length,
-    newCandidates,
+    issues: openIssues.length,
   };
 }
 

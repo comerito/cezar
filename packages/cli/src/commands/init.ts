@@ -133,7 +133,7 @@ export async function initCommand(opts: InitOptions, config: Config): Promise<vo
     await store.save();
     orgSpinner.succeed(`Found ${orgMembers.length} org member(s)`);
   } catch {
-    orgSpinner.warn('Could not fetch org members (needs-response action will be unavailable)');
+    orgSpinner.warn('Could not fetch org members (some actions may be unavailable)');
   }
 
   console.log(chalk.green(`\nStore initialized at ${config.store.path}/store.json`));

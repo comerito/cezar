@@ -20,15 +20,11 @@ import './actions/recurring-questions/index.js';
 import './actions/priority/index.js';
 import './actions/good-first-issue/index.js';
 import './actions/security/index.js';
-import './actions/release-notes/index.js';
-import './actions/milestone-planner/index.js';
 import './actions/stale/index.js';
 import './actions/contributor-welcome/index.js';
 import './actions/quality/index.js';
 import './actions/done-detector/index.js';
 import './actions/claim-detector/index.js';
-import './actions/needs-response/index.js';
-import './actions/issue-check/index.js';
 import './actions/categorize/index.js';
 import './actions/bug-detector/index.js';
 import './actions/autofix/index.js';
@@ -81,7 +77,6 @@ program.command('run <action>')
   .option('--dry-run', 'Show what would happen without writing')
   .option('--format <format>', 'table|json|markdown', 'table')
   .option('--no-interactive', 'Force non-interactive mode')
-  .option('--description <text>', 'Issue description (for issue-check action)')
   .option('--issue <n>', 'Target a single issue number (for autofix)', v => parseInt(v, 10))
   .option('--max-issues <n>', 'Limit how many issues to process (for autofix)', v => parseInt(v, 10))
   .option('--retry', 'Reset attempt counter before running (autofix): lets a previously-exhausted issue be re-tried')

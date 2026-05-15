@@ -1,6 +1,6 @@
 import { getActiveWorkspace } from '@/lib/workspace';
 import { loadAnalytics } from './load-analytics';
-import type { WeekBucket, FlowOutcomeBucket, DistributionEntry, CostEntry } from './load-analytics';
+import type { WeekBucket, DistributionEntry } from './load-analytics';
 
 export default async function AnalyticsPage() {
   const workspace = await getActiveWorkspace();
@@ -37,11 +37,11 @@ export default async function AnalyticsPage() {
           <VelocityChart buckets={data.velocity} />
         </Card>
 
-        <Card title="Autofix Outcomes">
-          {data.flowOutcomes.length > 0 ? (
-            <HBar entries={data.flowOutcomes.map((f) => ({ label: f.status, count: f.count }))} />
+        <Card title="Workflow-run Outcomes">
+          {data.runOutcomes.length > 0 ? (
+            <HBar entries={data.runOutcomes.map((r) => ({ label: r.status, count: r.count }))} />
           ) : (
-            <Empty>No autofix flows yet</Empty>
+            <Empty>No workflow runs yet</Empty>
           )}
         </Card>
 
@@ -72,20 +72,22 @@ export default async function AnalyticsPage() {
         <Card title="Agent Cost Tracking">
           <div className="mb-3 flex items-baseline gap-2">
             <span className="text-lg font-semibold text-fg">{data.totalTokens.toLocaleString()}</span>
-            <span className="text-xs text-fg-subtle">total tokens across {data.costs.length} flows</span>
+            <span className="text-xs text-fg-subtle">total tokens across {data.costs.length} runs</span>
           </div>
           {data.costs.length > 0 ? (
             <div className="max-h-48 space-y-1 overflow-y-auto">
               {data.costs.slice(0, 20).map((c) => (
-                <div key={c.flowId} className="flex items-center justify-between text-xs">
-                  <span className="text-fg-muted">#{c.issueNumber}</span>
+                <div key={c.runId} className="flex items-center justify-between text-xs">
+                  <span className="text-fg-muted">
+                    {c.workflow} {c.issueNumber != null ? `#${c.issueNumber}` : ''}
+                  </span>
                   <span className="text-fg-subtle">{c.tokensUsed.toLocaleString()} tokens</span>
                   <StatusDot status={c.status} />
                 </div>
               ))}
             </div>
           ) : (
-            <Empty>No flows yet</Empty>
+            <Empty>No runs yet</Empty>
           )}
         </Card>
       </div>

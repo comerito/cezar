@@ -1,33 +1,34 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { getActiveWorkspace } from '@/lib/workspace';
-import type { Database, FlowStatus } from '@/lib/supabase/types';
+import type { Database, DbWorkflowRunStatus } from '@/lib/supabase/types';
 
-type FlowRow = Database['public']['Tables']['flows']['Row'];
-type EventRow = Database['public']['Tables']['flow_events']['Row'];
+type WorkflowRunRow = Database['public']['Tables']['workflow_runs']['Row'];
+type EventRow = Database['public']['Tables']['agent_run_events']['Row'];
 
 interface ActivityItem {
   id: string;
-  type: 'flow_created' | 'flow_completed' | 'lifecycle';
+  type: 'run_started' | 'run_completed' | 'lifecycle';
   message: string;
-  status?: FlowStatus;
-  issueNumber?: number;
-  flowId?: string;
+  status?: DbWorkflowRunStatus;
+  issueNumber?: number | null;
+  runId?: string;
   timestamp: string;
 }
 
 async function loadActivity(workspaceId: string): Promise<ActivityItem[]> {
   const supabase = await createSupabaseServerClient();
 
-  const [{ data: flows }, { data: events }] = await Promise.all([
+  const [{ data: runs }, { data: events }] = await Promise.all([
     supabase
-      .from('flows')
-      .select('id, issue_number, status, mode, outcome, created_at, updated_at')
+      .from('workflow_runs')
+      .select('id, workflow, issue_number, status, outcome, started_at, finished_at, pr_url, reason')
       .eq('workspace_id', workspaceId)
-      .order('updated_at', { ascending: false })
+      .order('started_at', { ascending: false })
       .limit(50),
     supabase
-      .from('flow_events')
-      .select('id, flow_id, type, payload, created_at')
+      .from('agent_run_events')
+      .select('id, workflow_run_id, type, payload, created_at')
+      .eq('workspace_id', workspaceId)
       .eq('type', 'lifecycle')
       .order('created_at', { ascending: false })
       .limit(100),
@@ -35,49 +36,51 @@ async function loadActivity(workspaceId: string): Promise<ActivityItem[]> {
 
   const items: ActivityItem[] = [];
 
-  for (const f of flows ?? []) {
-    const outcome = f.outcome as any;
-    const isTerminal = ['succeeded', 'failed', 'skipped', 'pr-opened'].includes(f.status);
+  for (const r of (runs ?? []) as WorkflowRunRow[]) {
+    const isTerminal = r.status === 'succeeded' || r.status === 'failed' || r.status === 'cancelled';
+    const issueRef = r.issue_number != null ? `#${r.issue_number}` : '(no issue)';
 
     items.push({
-      id: `flow-${f.id}`,
-      type: 'flow_created',
-      message: `Autofix started for #${f.issue_number} (${f.mode})`,
-      status: f.status,
-      issueNumber: f.issue_number,
-      flowId: f.id,
-      timestamp: f.created_at,
+      id: `run-${r.id}`,
+      type: 'run_started',
+      message: `${r.workflow} started for ${issueRef}`,
+      status: r.status,
+      issueNumber: r.issue_number,
+      runId: r.id,
+      timestamp: r.started_at ?? r.finished_at ?? new Date().toISOString(),
     });
 
-    if (isTerminal) {
-      const msg = f.status === 'pr-opened'
-        ? `PR opened for #${f.issue_number}${outcome?.prUrl ? ` — ${outcome.prUrl}` : ''}`
-        : f.status === 'failed'
-          ? `Autofix failed for #${f.issue_number}: ${outcome?.reason ?? 'unknown'}`
-          : `Autofix ${f.status} for #${f.issue_number}`;
+    if (isTerminal && r.finished_at) {
+      const prSuffix = r.pr_url ? ` — ${r.pr_url}` : '';
+      const msg =
+        r.status === 'failed'
+          ? `${r.workflow} failed for ${issueRef}: ${r.reason ?? 'unknown'}`
+          : r.pr_url
+            ? `${r.workflow} opened a PR for ${issueRef}${prSuffix}`
+            : `${r.workflow} ${r.status} for ${issueRef}`;
 
       items.push({
-        id: `flow-done-${f.id}`,
-        type: 'flow_completed',
+        id: `run-done-${r.id}`,
+        type: 'run_completed',
         message: msg,
-        status: f.status,
-        issueNumber: f.issue_number,
-        flowId: f.id,
-        timestamp: f.updated_at,
+        status: r.status,
+        issueNumber: r.issue_number,
+        runId: r.id,
+        timestamp: r.finished_at,
       });
     }
   }
 
-  for (const e of events ?? []) {
-    const payload = e.payload as any;
+  for (const e of (events ?? []) as EventRow[]) {
+    const payload = e.payload as { message?: string } | null;
     const msg = payload?.message;
     if (!msg || typeof msg !== 'string') continue;
     if (msg.startsWith('[#')) {
       items.push({
-        id: e.id,
+        id: `event-${e.id}`,
         type: 'lifecycle',
         message: msg,
-        flowId: e.flow_id,
+        runId: e.workflow_run_id ?? undefined,
         timestamp: e.created_at,
       });
     }
@@ -111,11 +114,11 @@ export default async function ActivityPage() {
 
       {items.length === 0 ? (
         <div className="rounded-lg border border-dashed border-border bg-bg-elevated p-8 text-center text-sm text-fg-muted">
-          No activity yet. Sync issues or run an autofix to generate events.
+          No activity yet. Sync issues or run a workflow to generate events.
         </div>
       ) : (
         <div className="space-y-0">
-          {items.map((item, idx) => (
+          {items.map((item) => (
             <div key={item.id} className="flex gap-4 border-l-2 border-border py-2 pl-4">
               <div className="w-16 shrink-0 text-right text-xs text-fg-subtle">
                 {formatTime(item.timestamp)}
@@ -125,12 +128,12 @@ export default async function ActivityPage() {
                   <TypeIcon type={item.type} status={item.status} />
                   <span className="text-xs text-fg">{item.message}</span>
                 </div>
-                {item.flowId && (
+                {item.runId && (
                   <a
-                    href={`/flows/cockpit/${item.flowId}`}
+                    href={`/cockpit/${item.runId}`}
                     className="mt-0.5 inline-block text-xs text-fg-subtle hover:text-accent"
                   >
-                    view cockpit
+                    view run
                   </a>
                 )}
               </div>
@@ -142,11 +145,10 @@ export default async function ActivityPage() {
   );
 }
 
-function TypeIcon({ type, status }: { type: string; status?: FlowStatus }) {
-  if (type === 'flow_completed' && status === 'pr-opened') return <span className="text-xs text-accent">PR</span>;
-  if (type === 'flow_completed' && status === 'failed') return <span className="text-xs text-danger">✗</span>;
-  if (type === 'flow_completed') return <span className="text-xs text-accent">✓</span>;
-  if (type === 'flow_created') return <span className="text-xs text-fg-muted">▸</span>;
+function TypeIcon({ type, status }: { type: string; status?: DbWorkflowRunStatus }) {
+  if (type === 'run_completed' && status === 'failed') return <span className="text-xs text-danger">✗</span>;
+  if (type === 'run_completed') return <span className="text-xs text-accent">✓</span>;
+  if (type === 'run_started') return <span className="text-xs text-fg-muted">▸</span>;
   return <span className="text-xs text-fg-subtle">·</span>;
 }
 

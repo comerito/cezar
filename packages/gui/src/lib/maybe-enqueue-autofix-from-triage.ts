@@ -11,6 +11,9 @@ export interface TriageOutcomeLike {
   route?: string | null;
   issueType?: string | null;
   bugConfidence?: number | null;
+  bugReason?: string | null;
+  priority?: string | null;
+  priorityReason?: string | null;
 }
 
 export interface MaybeEnqueueAutofixParams {

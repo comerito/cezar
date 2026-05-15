@@ -1,16 +1,8 @@
 import { createSupabaseServerClient } from '@/lib/supabase/server';
 import { SupabaseStoreAdapter } from '@/lib/adapters/supabase-store';
 import { getActiveWorkspace } from '@/lib/workspace';
-import type { IssueAutofixCandidateStatus } from '@/lib/supabase/types';
-import { ActivateButton } from './activate-button';
 import { AutofixButton } from './autofix-button';
 import type { StoredIssue } from '@cezar/core';
-
-interface CandidateInfo {
-  status: IssueAutofixCandidateStatus;
-  matchedPrNumber: number | null;
-  dispatchedFlowId: string | null;
-}
 
 export default async function IssuesPage() {
   const workspace = await getActiveWorkspace();
@@ -28,26 +20,12 @@ export default async function IssuesPage() {
 
   let issues: StoredIssue[] = [];
   let loadError: string | null = null;
-  const candidates = new Map<number, CandidateInfo>();
 
   try {
     const supabase = await createSupabaseServerClient();
     const adapter = new SupabaseStoreAdapter(supabase, workspace.id);
     const store = await adapter.load();
     issues = store.issues;
-
-    const { data: rows } = await supabase
-      .from('issue_autofix_candidates')
-      .select('issue_number, status, matched_pr_number, dispatched_flow_id')
-      .eq('workspace_id', workspace.id);
-
-    for (const row of rows ?? []) {
-      candidates.set(row.issue_number, {
-        status: row.status,
-        matchedPrNumber: row.matched_pr_number,
-        dispatchedFlowId: row.dispatched_flow_id,
-      });
-    }
   } catch (err) {
     loadError = (err as Error).message;
   }
@@ -65,29 +43,12 @@ export default async function IssuesPage() {
       {!loadError && issues.length === 0 && (
         <EmptyState title="No issues yet" body="Sync issues to the workspace to see them here." />
       )}
-      {!loadError && issues.length > 0 && (
-        <IssueTable
-          issues={issues}
-          candidates={candidates}
-          repoOwner={workspace.repoOwner}
-          repoName={workspace.repoName}
-        />
-      )}
+      {!loadError && issues.length > 0 && <IssueTable issues={issues} />}
     </div>
   );
 }
 
-function IssueTable({
-  issues,
-  candidates,
-  repoOwner,
-  repoName,
-}: {
-  issues: StoredIssue[];
-  candidates: Map<number, CandidateInfo>;
-  repoOwner: string;
-  repoName: string;
-}) {
+function IssueTable({ issues }: { issues: StoredIssue[] }) {
   return (
     <div className="overflow-hidden rounded-lg border border-border">
       <table className="w-full text-sm">
@@ -100,7 +61,6 @@ function IssueTable({
             <th className="px-4 py-3">Type</th>
             <th className="px-4 py-3">Labels</th>
             <th className="px-4 py-3">Comments</th>
-            <th className="px-4 py-3">Loop</th>
             <th className="px-4 py-3">Autofix</th>
           </tr>
         </thead>
@@ -138,14 +98,6 @@ function IssueTable({
               </td>
               <td className="px-4 py-3 text-fg-muted">{issue.commentCount}</td>
               <td className="px-4 py-3">
-                <LoopCell
-                  candidate={candidates.get(issue.number)}
-                  issueNumber={issue.number}
-                  repoOwner={repoOwner}
-                  repoName={repoName}
-                />
-              </td>
-              <td className="px-4 py-3">
                 {issue.analysis.issueType === 'bug' && (issue.analysis.bugConfidence ?? 0) >= 0.7 && issue.analysis.autofixStatus !== 'pr-opened' ? (
                   <AutofixButton issueNumber={issue.number} />
                 ) : issue.analysis.autofixStatus === 'pr-opened' ? (
@@ -160,63 +112,6 @@ function IssueTable({
       </table>
     </div>
   );
-}
-
-function LoopCell({
-  candidate,
-  issueNumber,
-  repoOwner,
-  repoName,
-}: {
-  candidate: CandidateInfo | undefined;
-  issueNumber: number;
-  repoOwner: string;
-  repoName: string;
-}) {
-  if (!candidate) return <span className="text-xs text-fg-subtle">—</span>;
-
-  switch (candidate.status) {
-    case 'pending_match':
-      return <Pill tone="muted">checking…</Pill>;
-    case 'matched_to_pr':
-      if (candidate.matchedPrNumber == null) return <Pill tone="muted">matched</Pill>;
-      return (
-        <a
-          href={`https://github.com/${repoOwner}/${repoName}/pull/${candidate.matchedPrNumber}`}
-          target="_blank"
-          rel="noreferrer"
-          className="text-xs text-accent hover:text-accent-hover"
-        >
-          PR #{candidate.matchedPrNumber}
-        </a>
-      );
-    case 'unmatched':
-      return <Pill tone="muted">unmatched</Pill>;
-    case 'notified':
-      return <ActivateButton issueNumber={issueNumber} />;
-    case 'dispatched':
-      if (!candidate.dispatchedFlowId) return <Pill tone="muted">dispatched</Pill>;
-      return (
-        <a
-          href={`/flows/cockpit/${candidate.dispatchedFlowId}`}
-          className="text-xs text-accent hover:text-accent-hover"
-        >
-          → flow
-        </a>
-      );
-    case 'resolved':
-      return <Pill tone="success">resolved</Pill>;
-    default:
-      return <span className="text-xs text-fg-subtle">—</span>;
-  }
-}
-
-function Pill({ tone, children }: { tone: 'muted' | 'success'; children: React.ReactNode }) {
-  const cls =
-    tone === 'success'
-      ? 'bg-accent/15 text-accent'
-      : 'bg-bg-subtle text-fg-muted';
-  return <span className={`rounded-full px-2 py-0.5 text-xs ${cls}`}>{children}</span>;
 }
 
 const PRIORITY_COLORS: Record<string, string> = {

@@ -63,11 +63,6 @@ export const IssueAnalysisSchema = z.object({
   claimComment: z.string().nullable().default(null),
   claimDetectedAt: z.string().nullable().default(null),
 
-  // Needs response action
-  needsResponseStatus: z.enum(['needs-response', 'responded', 'new-issue']).nullable().default(null),
-  needsResponseReason: z.string().nullable().default(null),
-  needsResponseAnalyzedAt: z.string().nullable().default(null),
-
   // Categorize action
   featureCategory: z.enum(['framework', 'domain', 'integration']).nullable().default(null),
   featureCategoryReason: z.string().nullable().default(null),

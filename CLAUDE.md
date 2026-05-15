@@ -14,13 +14,17 @@ API · Claude Code CLI · Codex CLI), and a model. Agents run via a managed clou
 (API key, the `/api/cron/dispatch` cron) or an optional self-hosted `@cezar/runner`
 daemon.
 
-**Status:** mid-refactor. Phases 0–5 of the agent-cockpit refactor are merged but
-**dark** — `config.workflow.useEngine` defaults off (the legacy `AutofixOrchestrator`
-path runs unchanged), migrations `0007`–`0010` are unapplied, the 6 legacy `/api/cron/*`
-routes and the `/flows` UI are untouched. The design of record is
-`docs/REFACTOR-PLAN-agent-cockpit.md`; the activation runbook is `MIGRATION.md`.
-(The old `github-issue-manager-SPEC-v3.md` is long superseded — ignore it.) The
-solo-use Legacy CLI (interactive hub + `init`/`sync`/`run`/`status`) still works.
+**Status:** post-cutover. The agent-cockpit refactor is the live path — the
+declarative workflow engine drives every autofix run, the `workflow_runs` /
+`agent_runs` / `agent_run_events` tables back the cockpit, and the legacy
+`flows`/`flow_events`/`ci_*`/`issue_autofix_candidates` tables + the 5 old
+`/api/cron/{issue-match,issue-fix,ci-watch,ci-attribute,ci-fix}` routes + the
+`/flows` UI are retired (migration `0011_retire_legacy_path.sql`). `issue-sync`
+is kept as the GitHub → `issues`-table reconcile cron (auto-triage backlog +
+missed-webhook safety net); `dispatch` and `triage-sweep` are the new path.
+The design of record is `docs/REFACTOR-PLAN-agent-cockpit.md`; the activation
+runbook is `MIGRATION.md`. The solo-use CLI (interactive hub + `init` / `sync`
+/ `run` / `status` / `runs`) still works against a local file store.
 
 ## Commands
 
@@ -66,7 +70,7 @@ cd packages/core && npx vitest run tests/store/store.test.ts
 
 ### Data Flow (Three Phases)
 
-1. **Fetch** — `init`/`sync` (CLI) or the issue-sync cron (GUI) pulls issues from the GitHub API into the store.
+1. **Fetch** — `init`/`sync` (CLI) or the `issue-sync` cron + the GitHub App webhook (GUI) pulls issues from the GitHub API into the store.
 2. **Digest** — Claude generates compact per-issue summaries; comments are fetched and stored too.
 3. **Analyze** — Actions run against digested issues; the workflow engine / autofix run on top.
 
@@ -78,10 +82,10 @@ side-effect imports in `packages/cli/src/index.ts`; the hub auto-discovers regis
 To add one: create `packages/core/src/actions/{name}/` with `prompt.ts`, `runner.ts`,
 `interactive.ts`, `index.ts`; export the runner/prompt from `packages/core/src/index.ts`;
 add the side-effect import to `packages/cli/src/index.ts`. The triage workflow reuses
-`bug-detector` and `priority`; `auto-label`/`security`/etc. are used directly. Four
-genuinely-orphaned display-only actions (`issue-check`, `release-notes`, `milestone-planner`,
-`needs-response`) are hidden from the CLI hub unless `config.experimental === true` — they
-stay registered (so `cezar run <id>` and the GUI are unaffected).
+`bug-detector`, `priority`, and `duplicates` (the real `dedupe-check` step against the
+open-issue knowledge base); `auto-label`/`security`/etc. are used directly. (The four
+display-only orphans — `issue-check`, `release-notes`, `milestone-planner`, `needs-response`
+— were dropped in the legacy-path cleanup; if you need them, restore from git history.)
 
 **Agent runner abstraction** (`packages/core/src/agents/`): `AgentRunner` interface with
 three implementations — `AnthropicApiRunner`, `ClaudeCodeCliRunner`, `CodexCliRunner` —
@@ -97,9 +101,10 @@ blackboard, emitting an `AgentRunRecord` per step, and posting one *living* comm
 issue (then the PR). Definitions: `autofixWorkflow`, `ciFollowupWorkflow`, `triageWorkflow`
 (under `definitions/`). Step config resolves via `resolveStepConfig` /
 `WorkflowBinding`: step binding → run-launch override → workspace default → built-in default.
-`config.workflow.useEngine` (default **off**) decides whether `AutofixOrchestrator` delegates
-to `runWorkflow` or runs its legacy hand-rolled path; when off, behavior is byte-identical
-to today.
+Effect steps receive `{ github, git, store }` as their `deps` (the `store` lets the real
+`dedupe-check` triage step pull the open-issue knowledge base without a separate fetch).
+`config.workflow.useEngine` flips the cron dispatch path to always-on inside
+`executeWorkflowJob`; the legacy hand-rolled `AutofixOrchestrator` path remains for the CLI.
 
 **Skills** (`packages/core/src/skills/skill-catalog.ts`): `discoverSkills` globs `.ai/skills/**/*.md`
 in the target repo (config: `autofix.skillsDir`, default `.ai/skills`). A skill is a Markdown
@@ -109,17 +114,18 @@ file with optional YAML frontmatter (`name`, `description`, `cezar-stages`). Emp
 **GUI cockpit + job queue** (`packages/gui`): the cockpit pages (`/cockpit`, `/cockpit/[runId]`)
 render `workflow_runs` / `agent_runs` / `agent_run_events` live via Supabase Realtime. The job
 queue is `jobs` → `workflow_runs` → `agent_runs` → `agent_run_events` plus a `runners` table
-(migrations `0007`–`0010`, unapplied). `/api/cron/dispatch` claims jobs (`claim_next_job`,
-`FOR UPDATE SKIP LOCKED`) and runs them in-process; `/api/cron/triage-sweep` is the
-webhook poll fallback; `/api/runner/*` is the long-poll API for self-hosted runners.
-`run-orchestrator.ts` (legacy `flows` path + engine branch) and `execute-workflow-job.ts`
-(engine-only, used by dispatch + runner) both persist the run rows — deduping them is
-deferred (`TODO(phase-6, after live cutover)`).
+(migrations `0007`–`0011`). `/api/cron/dispatch` claims jobs (`claim_next_job`,
+`FOR UPDATE SKIP LOCKED`) and runs them in-process via `execute-workflow-job.ts`;
+`/api/cron/triage-sweep` is the missed-webhook poll fallback; `/api/cron/issue-sync` is
+the GitHub → `issues`-table reconcile; `/api/runner/*` is the long-poll API for
+self-hosted runners. Shared `workflow_runs` / `agent_runs` / `agent_run_events` writes
+go through `lib/persist-workflow-run.ts`.
 
 **Webhook receiver** (`packages/gui/src/app/api/github/webhook/`): GitHub App deliveries —
-`issues.opened`/`reopened`/`edited` enqueue a deduped `triage` job; `installation` records
+`issues.opened`/`reopened`/`edited` enqueue a deduped `triage` job; `check_run.completed`
+with a failing conclusion on an autofix-owned PR enqueues a `ci-followup` job (capped at
+3 prior attempts; deduped against open jobs); `installation` records
 `workspaces.installation_id`. Returns 503 (no-op) until `GITHUB_APP_WEBHOOK_SECRET` is set.
-The `check_run` handler is a deliberate no-op (CI-followup-via-webhook re-wiring is post-cutover).
 
 **`@cezar/runner`** (`packages/runner`): the optional self-hosted daemon (`cezar-runner login`/`start`,
 CLI built on `node:util.parseArgs`). Long-polls `/api/runner/jobs`, claims jobs whose backend
@@ -154,7 +160,7 @@ confirmation; `--dry-run` previews.
 - `GITHUB_TOKEN` — GitHub API authentication (CLI / OAuth fallback)
 - `ANTHROPIC_API_KEY` — Claude API (digests + agent runs on the managed path)
 - `GITHUB_APP_ID` / `GITHUB_APP_PRIVATE_KEY` / `GITHUB_APP_WEBHOOK_SECRET` — the GitHub App (webhooks + install tokens); without the secret the webhook receiver returns 503
-- `CEZAR_USE_WORKFLOW_ENGINE` — `true` flips the workflow engine on globally (or set `workflow.useEngine` per workspace / in `.issuemanagerrc.json`)
-- `CRON_SECRET` — bearer check shared by all cron routes incl. `/api/cron/dispatch` and `/api/cron/triage-sweep`
+- `CEZAR_USE_WORKFLOW_ENGINE` — local CLI only: `true` opts the legacy `AutofixOrchestrator` path into delegating to `runWorkflow` (or set `workflow.useEngine: true` in `.issuemanagerrc.json`). The SaaS dispatch path always uses the engine.
+- `CRON_SECRET` — bearer check shared by `/api/cron/dispatch`, `/api/cron/triage-sweep`, `/api/cron/issue-sync`
 - `CEZAR_RUNNER_URL` / `CEZAR_RUNNER_TOKEN` — the self-hosted runner
 - Supabase vars + `NEXT_PUBLIC_APP_URL` (GUI) — see `MIGRATION.md` for the full list and the `CEZAR_DISPATCH_*` / `CEZAR_TRIAGE_SWEEP_*` tuning vars

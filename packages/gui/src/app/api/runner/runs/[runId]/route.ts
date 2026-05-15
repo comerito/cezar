@@ -76,13 +76,47 @@ export async function PATCH(req: Request, { params }: { params: Promise<{ runId:
   // `route: 'autofix'` (and the workspace + confidence allow it) queue the
   // follow-up autofix job. Best-effort; never blocks the runner's response.
   if (run.workflow === 'triage' && runStatus === 'succeeded' && run.issue_number != null) {
+    const triageOutcome = (body.outcome ?? null) as TriageOutcomeLike | null;
+    // Mirror execute-workflow-job.ts: persist the classification back to
+    // `issues.analysis` so the follow-up autofix dispatch passes its
+    // `issue.analysis.issueType === 'bug'` gate. The runner reports the
+    // outcome shape; we merge into the existing JSONB.
+    if (triageOutcome && triageOutcome.issueType) {
+      try {
+        const { data: issueRow } = await admin
+          .from('issues')
+          .select('analysis')
+          .eq('workspace_id', run.workspace_id)
+          .eq('number', run.issue_number)
+          .maybeSingle();
+        const prev = (issueRow?.analysis ?? {}) as Record<string, unknown>;
+        const nowIso = new Date().toISOString();
+        const merged = {
+          ...prev,
+          issueType: triageOutcome.issueType,
+          bugConfidence: triageOutcome.bugConfidence ?? null,
+          bugReason: triageOutcome.bugReason ?? null,
+          bugAnalyzedAt: nowIso,
+          priority: triageOutcome.priority ?? null,
+          priorityReason: triageOutcome.priorityReason ?? null,
+          priorityAnalyzedAt: triageOutcome.priority ? nowIso : null,
+        };
+        await admin
+          .from('issues')
+          .update({ analysis: merged as Database['public']['Tables']['issues']['Update']['analysis'] })
+          .eq('workspace_id', run.workspace_id)
+          .eq('number', run.issue_number);
+      } catch (err) {
+        console.error('[runner-finalize] persist triage analysis failed:', err instanceof Error ? err.message : err);
+      }
+    }
     try {
       const config = await loadWorkspaceConfig(run.workspace_id, admin);
       await maybeEnqueueAutofixFromTriage(admin, {
         workspaceId: run.workspace_id,
         repo: run.repo,
         issueNumber: run.issue_number,
-        outcome: (body.outcome ?? null) as TriageOutcomeLike | null,
+        outcome: triageOutcome,
         workspaceConfig: config,
       });
     } catch (err) {

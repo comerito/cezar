@@ -121,10 +121,6 @@ const ACTION_RUNNERS: Record<string, RunFn> = {
     const { SecurityRunner } = await import('@cezar/core');
     await new SecurityRunner(store, config).scan();
   },
-  'needs-response': async (store, config) => {
-    const { NeedsResponseRunner } = await import('@cezar/core');
-    await new NeedsResponseRunner(store, config).analyze();
-  },
   'claim-detector': async (store, config) => {
     const { ClaimDetectorRunner } = await import('@cezar/core');
     await new ClaimDetectorRunner(store, config).detect();
@@ -132,9 +128,5 @@ const ACTION_RUNNERS: Record<string, RunFn> = {
   'recurring-questions': async (store, config) => {
     const { RecurringQuestionRunner } = await import('@cezar/core');
     await new RecurringQuestionRunner(store, config).detect();
-  },
-  'milestone-planner': async (store, config) => {
-    const { MilestonePlanRunner } = await import('@cezar/core');
-    await new MilestonePlanRunner(store, config).plan();
   },
 };

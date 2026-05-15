@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import { BugDetectorResponseSchema } from '../../actions/bug-detector/prompt.js';
 import { PriorityResponseSchema } from '../../actions/priority/prompt.js';
+import { LLMService } from '../../services/llm.service.js';
 import { agentStep, type Workflow, type WorkflowStep, type WorkflowStepContext, type CommentSection } from '../workflow.js';
 
 /**
@@ -17,13 +18,13 @@ import { agentStep, type Workflow, type WorkflowStep, type WorkflowStepContext, 
  * decide whether to queue an autofix job (only when `route === 'autofix'`,
  * `autofix_enabled`, and `bugConfidence ≥ minBugConfidence`).
  *
- * TODO(phase-5): the dedupe step is still a thin placeholder — a real reuse of
- * the `duplicates` prompt needs the whole open-issue knowledge base as context.
- * The ~10 other triage actions (`categorize`, `security`, `quality`,
- * `good-first-issue`, `missing-info`, `needs-response`, `claim-detector`,
- * `contributor-welcome`, `recurring-questions`, `release-notes`,
- * `milestone-planner`, the mutating `stale`/`done-detector`/`duplicates` effects)
- * remain optional per-workspace triage steps, not wired here.
+ * The dedupe step reuses the `duplicates` prompt against the store's open-issue
+ * knowledge base (capped to {@link TRIAGE_DEDUPE_KB_CAP} most-recent digested
+ * issues so the prompt stays bounded on big repos). The other triage actions
+ * (`categorize`, `security`, `quality`, `good-first-issue`, `missing-info`,
+ * `claim-detector`, `contributor-welcome`, `recurring-questions`, the mutating
+ * `stale`/`done-detector`/`duplicates` effects) remain optional per-workspace
+ * triage steps, not wired here.
  */
 
 // ─── route-decision ─────────────────────────────────────────────────────────
@@ -68,7 +69,9 @@ export interface TriageOutcome {
   routeReason: string | null;
   issueType: TriageIssueType | null;
   bugConfidence: number | null;
+  bugReason: string | null;
   priority: TriagePriority | null;
+  priorityReason: string | null;
   duplicateOf: number | null;
 }
 
@@ -78,7 +81,9 @@ export function triageOutcomeFromBlackboard(bb: TriageBlackboard): TriageOutcome
     routeReason: bb.route?.reason ?? null,
     issueType: bb.isBug?.issueType ?? null,
     bugConfidence: bb.isBug?.confidence ?? null,
+    bugReason: bb.isBug?.reason ?? null,
     priority: bb.priority?.priority ?? null,
+    priorityReason: bb.priority?.reason ?? null,
     duplicateOf: bb.duplicateOf ?? null,
   };
 }
@@ -138,16 +143,53 @@ const priorityStep: WorkflowStep<TriageBlackboard> = agentStep<TriageBlackboard,
   },
 });
 
-// dedupe-check: a thin placeholder for now. TODO(phase-5): a real reuse of the
-// duplicates prompt (it needs the whole open-issue knowledge base, which a
-// repo-less single-issue step doesn't have to hand — wire it when the triage
-// workflow can pull the store's open issues as context).
+/**
+ * dedupe-check — runs the `duplicates` prompt for this one candidate against
+ * the workspace's open-issue knowledge base. Conservative by design:
+ *   - skips when the candidate has no digest yet (a fresh webhook issue may
+ *     race the issue-sync digest; route-decision then sees `duplicateOf: null`
+ *     just as it would have before).
+ *   - skips when no other digested issues exist.
+ *   - caps the KB to the {@link TRIAGE_DEDUPE_KB_CAP} most-recent digested
+ *     open issues to keep the prompt size bounded for workspaces with
+ *     thousands of issues. (TODO(phase-6): swap for embedding pre-filtering.)
+ *   - on any LLM failure, leaves `duplicateOf` null and continues — dedupe is
+ *     a hint, not a gate.
+ */
+const TRIAGE_DEDUPE_KB_CAP = 50;
 const dedupeCheckStep: WorkflowStep<TriageBlackboard> = {
   id: 'dedupe-check',
   kind: 'effect',
   builtinSkillId: 'duplicates',
-  run: async () => ({ kind: 'continue', blackboardPatch: { duplicateOf: null } }),
-  commentSection: (): CommentSection => null,
+  run: async (ctx: WorkflowStepContext<TriageBlackboard>, deps) => {
+    const candidate = deps.store.getIssue(ctx.issue.number);
+    if (!candidate || !candidate.digest) {
+      return { kind: 'continue', blackboardPatch: { duplicateOf: null } };
+    }
+    const knowledgeBase = deps.store
+      .getIssues({ state: 'open', hasDigest: true })
+      .filter((i) => i.number !== candidate.number)
+      .sort((a, b) => (b.updatedAt ?? '').localeCompare(a.updatedAt ?? ''))
+      .slice(0, TRIAGE_DEDUPE_KB_CAP);
+    if (knowledgeBase.length === 0) {
+      return { kind: 'continue', blackboardPatch: { duplicateOf: null } };
+    }
+    try {
+      const llm = new LLMService(ctx.config);
+      const matches = await llm.detectDuplicates([candidate], knowledgeBase);
+      const best = matches
+        .filter((m) => m.number === candidate.number)
+        .sort((a, b) => b.confidence - a.confidence)[0];
+      return { kind: 'continue', blackboardPatch: { duplicateOf: best?.duplicateOf ?? null } };
+    } catch (err) {
+      ctx.log(`dedupe-check: LLM call failed — ${(err as Error).message}`);
+      return { kind: 'continue', blackboardPatch: { duplicateOf: null } };
+    }
+  },
+  commentSection: (ctx: WorkflowStepContext<TriageBlackboard>): CommentSection => {
+    if (ctx.blackboard.duplicateOf == null) return null;
+    return { heading: '🪞 Possible duplicate', body: `Looks like a duplicate of #${ctx.blackboard.duplicateOf}.` };
+  },
 };
 
 const routeDecisionStep: WorkflowStep<TriageBlackboard> = agentStep<TriageBlackboard, RouteDecision>({
@@ -184,10 +226,17 @@ const KNOWN_TYPE_LABELS: Record<TriageIssueType, string | null> = {
 };
 
 /**
- * apply-labels — derives a couple of labels from the triage signals and adds
- * them (additively; we don't `setLabels` so we never strip existing labels).
- * No-ops for `route === 'ignore'`. TODO(phase-5): make the label set / whether
- * to apply at all workspace-configurable; for now it's a fixed conservative map.
+ * apply-labels — adds a small, fixed label set derived from the triage
+ * signals. Additive (uses `addLabel`, not `setLabels`) so we never strip
+ * labels a maintainer applied manually. Route-specific behavior:
+ *   - `autofix` / `label-only` / `needs-info`: type + priority labels (and
+ *     `needs-info` / `duplicate` markers when the signal applies).
+ *   - `ignore`: just `invalid` (no type/priority — the route already says
+ *     don't act on this). Auto-close is intentionally NOT done here — that's
+ *     destructive and needs explicit workspace config (TODO(phase-6)).
+ * Each `addLabel` is best-effort: failure (missing label, 404/422 from GitHub)
+ * is logged and skipped, the workflow continues. The 404/422 noise from
+ * pre-creating-missing labels in the connected repo is a separate concern.
  */
 const applyLabelsStep: WorkflowStep<TriageBlackboard> = {
   id: 'apply-labels',
@@ -195,11 +244,17 @@ const applyLabelsStep: WorkflowStep<TriageBlackboard> = {
   builtinSkillId: 'auto-label',
   run: async (ctx: WorkflowStepContext<TriageBlackboard>, deps) => {
     const bb = ctx.blackboard;
-    if (bb.route?.route === 'ignore') return { kind: 'continue' };
+    const route = bb.route?.route;
     const labels: string[] = [];
-    const typeLabel = bb.isBug ? KNOWN_TYPE_LABELS[bb.isBug.issueType] : null;
-    if (typeLabel) labels.push(typeLabel);
-    if (bb.priority) labels.push(`priority:${bb.priority.priority}`);
+    if (route === 'ignore') {
+      labels.push('invalid');
+    } else {
+      const typeLabel = bb.isBug ? KNOWN_TYPE_LABELS[bb.isBug.issueType] : null;
+      if (typeLabel) labels.push(typeLabel);
+      if (bb.priority) labels.push(`priority:${bb.priority.priority}`);
+      if (route === 'needs-info') labels.push('needs-info');
+      if (bb.duplicateOf != null) labels.push('duplicate');
+    }
     for (const label of labels) {
       try {
         await deps.github.addLabel(ctx.issue.number, label);
@@ -227,6 +282,7 @@ const commentSummaryStep: WorkflowStep<TriageBlackboard> = {
     const bb = ctx.blackboard;
     const route = bb.route?.route;
     const autofixEnabled = ctx.config.autofix?.enabled === true;
+    const dupSuffix = bb.duplicateOf != null ? ` (possible duplicate of #${bb.duplicateOf})` : '';
     let nextStep: string;
     switch (route) {
       case 'autofix':
@@ -235,16 +291,16 @@ const commentSummaryStep: WorkflowStep<TriageBlackboard> = {
           : '🤖 This looks auto-fixable, but automatic fixes are disabled for this workspace — enable them in Settings → Workflows to let Cezar open a draft PR.';
         break;
       case 'needs-info':
-        nextStep = 'ℹ️ This report seems to be missing information needed to act on it. A maintainer should ask for repro steps / environment details.';
+        nextStep = `ℹ️ Labelled \`needs-info\` — this report is missing the information needed to act on it. Please share: clear repro steps, expected vs. actual behavior, and your environment (OS, app/runtime version, browser if relevant).${dupSuffix}`;
         break;
       case 'label-only':
-        nextStep = '🏷 Labelled. No automated follow-up needed.';
+        nextStep = `🏷 Labelled. No automated follow-up needed.${dupSuffix}`;
         break;
       case 'ignore':
-        nextStep = '🚫 Nothing to do here (spam / duplicate / off-topic / already resolved).';
+        nextStep = `🚫 Labelled \`invalid\` — nothing to do here (${bb.route?.reason ?? 'spam / off-topic / already resolved'}).${dupSuffix}`;
         break;
       default:
-        nextStep = 'Triage complete.';
+        nextStep = `Triage complete.${dupSuffix}`;
     }
     return { heading: '➡️ Next', body: nextStep };
   },

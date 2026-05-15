@@ -62,13 +62,12 @@ export async function POST(req: Request): Promise<NextResponse> {
       case 'issues':
         return await handleIssues(admin, payload);
       case 'check_run':
-        // TODO(phase-5): the ci-watch/ci-attribute/ci-fix crons already drive the
-        // CI follow-up loop; converting it to webhook-driven jobs is a follow-up.
-        // For now, no-op (return 200).
-        return NextResponse.json({ ok: true, ignored: 'check_run handled by ci-* crons' });
+        return await handleCheckRun(admin, payload);
       case 'pull_request':
-        // TODO(phase-5): PR↔issue linking is the issue-match cron's job; no-op here.
-        return NextResponse.json({ ok: true, ignored: 'pull_request handled by issue-match cron' });
+        // PR↔issue linking is no longer tracked separately; the autofix workflow
+        // owns the PR it opens and the cockpit links runs to their PRs via
+        // `workflow_runs.pr_number`. No-op here for now.
+        return NextResponse.json({ ok: true, ignored: 'pull_request not used' });
       case 'installation':
       case 'installation_repositories':
         return await handleInstallation(admin, payload);
@@ -105,6 +104,14 @@ interface WebhookPayload {
   issue?: WebhookIssue;
   repository?: { name: string; owner: { login: string } };
   installation?: { id: number };
+  check_run?: {
+    name: string;
+    status: string;
+    conclusion: string | null;
+    head_sha: string;
+    html_url: string | null;
+    pull_requests?: Array<{ number: number; head?: { ref?: string }; base?: { ref?: string } }>;
+  };
 }
 
 // ─── issues ─────────────────────────────────────────────────────────────────
@@ -162,6 +169,117 @@ async function handleIssues(admin: SupabaseAdmin, payload: WebhookPayload): Prom
     }
     enqueued++;
   }
+  return NextResponse.json({ ok: true, enqueued, workspaces: workspaces.length });
+}
+
+// ─── check_run ──────────────────────────────────────────────────────────────
+
+/**
+ * `check_run.completed` with a failing conclusion on a PR that an autofix run
+ * opened → enqueue a `ci-followup` job whose payload carries the CiFollowupInput
+ * seed. The dispatcher (or runner) drains it via the engine's `ci-followup`
+ * workflow, which posts a fix attempt back to the same PR.
+ *
+ * Only acts when:
+ *   - `action === 'completed'` and `conclusion` is a failure-ish state
+ *     (`failure` / `timed_out` / `cancelled` / `action_required` / `startup_failure`).
+ *   - the head_sha (or one of the linked PRs) corresponds to a `workflow_runs`
+ *     row from THIS workspace where `workflow === 'autofix'` and `status === 'succeeded'`
+ *     (i.e. the autofix did open a PR — not a third-party PR happening to fail).
+ *
+ * The `attribution` field is a *seed*; the real attribution happens inside the
+ * `ci-followup` workflow's `attribute` step. We pass through the failed check
+ * name(s) and the html_url (so the agent can fetch logs if it wants).
+ */
+const CHECK_RUN_FAIL_CONCLUSIONS = new Set(['failure', 'timed_out', 'cancelled', 'action_required', 'startup_failure']);
+
+async function handleCheckRun(admin: SupabaseAdmin, payload: WebhookPayload): Promise<NextResponse> {
+  if (payload.action !== 'completed') return NextResponse.json({ ok: true, ignored: `check_run.${payload.action}` });
+  const cr = payload.check_run;
+  const repo = payload.repository;
+  if (!cr || !repo) return NextResponse.json({ ok: true, ignored: 'check_run missing payload/repo' });
+  if (cr.conclusion == null || !CHECK_RUN_FAIL_CONCLUSIONS.has(cr.conclusion)) {
+    return NextResponse.json({ ok: true, ignored: `check_run conclusion=${cr.conclusion}` });
+  }
+  const linkedPrNumbers = (cr.pull_requests ?? []).map((p) => p.number);
+  if (linkedPrNumbers.length === 0) {
+    return NextResponse.json({ ok: true, ignored: 'check_run not linked to any PR' });
+  }
+
+  const workspaces = await resolveWorkspaces(admin, payload, repo);
+  if (workspaces.length === 0) return NextResponse.json({ ok: true, ignored: 'no matching workspace' });
+
+  const repoSlug = `${repo.owner.login}/${repo.name}`;
+  let enqueued = 0;
+
+  for (const ws of workspaces) {
+    // Find the autofix workflow_run that owns one of the linked PRs.
+    const { data: ownRuns } = await admin
+      .from('workflow_runs')
+      .select('id, issue_number, pr_number, branch')
+      .eq('workspace_id', ws.id)
+      .eq('workflow', 'autofix')
+      .in('pr_number', linkedPrNumbers)
+      .limit(1);
+    const ownRun = ownRuns?.[0];
+    if (!ownRun || ownRun.issue_number == null || ownRun.pr_number == null) continue;
+
+    // Count prior ci-followup attempts for this PR so the agent honours the
+    // attempt cap. (`workflow_runs.pr_number` is the source of truth.)
+    const { count: priorAttempts } = await admin
+      .from('workflow_runs')
+      .select('id', { count: 'exact', head: true })
+      .eq('workspace_id', ws.id)
+      .eq('workflow', 'ci-followup')
+      .eq('pr_number', ownRun.pr_number);
+    const attemptMax = 3;
+    if ((priorAttempts ?? 0) >= attemptMax) continue;
+
+    // Dedupe — skip if a ci-followup job is already queued for this PR.
+    const { data: open } = await admin
+      .from('jobs')
+      .select('id')
+      .eq('workspace_id', ws.id)
+      .eq('kind', 'ci-followup')
+      .eq('pr_number', ownRun.pr_number)
+      .in('status', ['queued', 'claimed', 'running'])
+      .limit(1);
+    if (open && open.length > 0) continue;
+
+    // Build the CiFollowupInput seed. The `attribute` workflow step does the
+    // real attribution work; this just provides the entry point.
+    const ciFollowupSeed = {
+      issueNumber: ownRun.issue_number,
+      prNumber: ownRun.pr_number,
+      branch: ownRun.branch ?? '',
+      attemptIndex: (priorAttempts ?? 0) + 1,
+      attemptMax,
+      attribution: {
+        reasoning: `check_run '${cr.name}' on PR #${ownRun.pr_number} concluded '${cr.conclusion}'`,
+        preExistingChecks: [],
+      },
+      failedCheckNames: [cr.name],
+      logTails: cr.html_url ? [{ checkName: cr.name, lines: [`(see ${cr.html_url})`] }] : undefined,
+    };
+
+    const { error } = await admin.from('jobs').insert({
+      workspace_id: ws.id,
+      repo: repoSlug,
+      kind: 'ci-followup',
+      issue_number: ownRun.issue_number,
+      pr_number: ownRun.pr_number,
+      priority: 8,
+      status: 'queued',
+      max_attempts: 1,
+      payload: { trigger: 'webhook', ciFollowup: ciFollowupSeed },
+    });
+    if (error) {
+      console.error(`[github-webhook] ci-followup enqueue failed for ws ${ws.id}:`, error.message);
+      continue;
+    }
+    enqueued++;
+  }
+
   return NextResponse.json({ ok: true, enqueued, workspaces: workspaces.length });
 }
 

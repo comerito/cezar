@@ -288,6 +288,7 @@ export class WorkflowEngine {
         createPullRequest: (o) => ctx.github.createPullRequest(o),
       },
       git: gitOps,
+      store: ctx.store,
     };
 
     const finishRun = async (

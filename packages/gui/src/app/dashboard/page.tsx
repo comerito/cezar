@@ -1,19 +1,18 @@
 import Link from 'next/link';
 import { ActionGrid } from '@/components/action-grid';
 import { getActiveWorkspace } from '@/lib/workspace';
-import { loadAutofixLoopStats, type AutofixLoopStats } from './load-autofix-loop';
 import { loadAgentRunStats, type AgentRunStats } from './load-agent-runs';
 import { loadWorkspaceBadges } from './load-badges';
 import { loadRepoStats } from './load-stats';
 import { SyncButton } from './sync-button';
+import { ExtLink } from './ext-link';
 import { RunStatusBadge } from '@/app/cockpit/cockpit-ui';
 
 export default async function DashboardPage() {
   const workspace = await getActiveWorkspace();
-  const [badges, stats, loopStats, agentRuns] = await Promise.all([
+  const [badges, stats, agentRuns] = await Promise.all([
     workspace ? loadWorkspaceBadges(workspace.id) : undefined,
     workspace ? loadRepoStats(workspace.id) : null,
-    workspace ? loadAutofixLoopStats(workspace.id) : null,
     workspace ? loadAgentRunStats(workspace.id) : null,
   ]);
 
@@ -49,33 +48,8 @@ export default async function DashboardPage() {
           </div>
         )}
       </header>
-      {loopStats && loopStats.mode !== 'off' && <AutofixLoopCard stats={loopStats} />}
       {agentRuns && <AgentRunsCard stats={agentRuns} repoOwner={workspace?.repoOwner ?? ''} repoName={workspace?.repoName ?? ''} />}
       <ActionGrid badges={badges} />
-    </div>
-  );
-}
-
-function AutofixLoopCard({ stats }: { stats: AutofixLoopStats }) {
-  // Subtle accent only when there's a pending one-click — otherwise the card
-  // is informational and shouldn't compete with the action grid below.
-  const accent = stats.notified > 0 ? 'border-accent/30 bg-accent/5' : 'border-border bg-bg-elevated';
-  return (
-    <div className={`mb-6 flex items-center justify-between rounded-lg border ${accent} px-5 py-4`}>
-      <div className="flex items-center gap-8">
-        <div>
-          <div className="text-sm font-medium text-fg">Issue autofix loop</div>
-          <div className="text-xs text-fg-subtle">mode: {stats.mode}</div>
-        </div>
-        <div className="flex items-center gap-6 text-sm">
-          <Stat label="Notified" value={stats.notified} color={stats.notified > 0 ? 'accent' : 'muted'} />
-          <Stat label="Dispatched" value={stats.dispatched} color="muted" />
-          <Stat label="Matched" value={stats.matchedToPr} color="muted" />
-        </div>
-      </div>
-      <Link href="/issues" className="text-sm text-accent hover:text-accent-hover">
-        → Triage
-      </Link>
     </div>
   );
 }
@@ -122,15 +96,9 @@ function AgentRunsCard({
                   <RunStatusBadge status={r.status} />
                   <span className="text-fg-muted">{r.workflow}</span>
                   {gh ? (
-                    <a
-                      href={gh}
-                      target="_blank"
-                      rel="noreferrer"
-                      onClick={(e) => e.stopPropagation()}
-                      className="text-accent hover:underline"
-                    >
+                    <ExtLink href={gh} target="_blank" rel="noreferrer" className="text-accent hover:underline">
                       {ref}
-                    </a>
+                    </ExtLink>
                   ) : (
                     <span className="text-fg-subtle">{ref}</span>
                   )}

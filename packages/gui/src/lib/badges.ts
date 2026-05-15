@@ -105,16 +105,6 @@ export function computeBadges(store: IssueStore, config: Config): Record<string,
       available: hasDigestIssues ? true : noDigest,
     },
 
-    'release-notes': {
-      badge: closedDigest.length > 0 ? `${closedDigest.length} closed issues` : 'no closed issues',
-      available: closedDigest.length > 0 ? true : 'no closed issues with digest — sync with --include-closed',
-    },
-
-    'milestone-planner': {
-      badge: `${openDigest.length} open issues`,
-      available: openDigest.length >= 3 ? true : 'need at least 3 open issues for meaningful grouping',
-    },
-
     stale: {
       badge: (() => {
         const threshold = 90;
@@ -161,34 +151,6 @@ export function computeBadges(store: IssueStore, config: Config): Record<string,
         return unchecked > 0 ? `${unchecked} unchecked` : 'up to date';
       })(),
       available: hasOpenIssues ? true : noOpen,
-    },
-
-    'needs-response': {
-      badge: (() => {
-        if (openDigest.length === 0) return 'no open issues';
-        const unanalyzed = openDigest.filter((i) => i.analysis.needsResponseAnalyzedAt === null).length;
-        const updated = openDigest.filter((i) =>
-          i.analysis.needsResponseAnalyzedAt !== null &&
-          i.commentsFetchedAt !== null &&
-          i.commentsFetchedAt > i.analysis.needsResponseAnalyzedAt,
-        ).length;
-        const total = unanalyzed + updated;
-        if (total === 0) return `${openDigest.length} issues (all analyzed)`;
-        const parts: string[] = [];
-        if (unanalyzed > 0) parts.push(`${unanalyzed} unanalyzed`);
-        if (updated > 0) parts.push(`${updated} updated`);
-        return parts.join(', ');
-      })(),
-      available: (() => {
-        if (!hasOpenDigest) return noOpenDigest;
-        if (!meta.orgMembers || meta.orgMembers.length === 0) return 'no org members loaded — run sync first';
-        return true;
-      })(),
-    },
-
-    'issue-check': {
-      badge: openDigest.length > 0 ? `${openDigest.length} searchable` : 'no open issues',
-      available: hasOpenDigest ? true : noOpenDigest,
     },
 
     categorize: {

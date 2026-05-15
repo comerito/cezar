@@ -23,11 +23,12 @@ export async function loadRepoStats(workspaceId: string): Promise<RepoStats | nu
       supabase.from('workspaces').select('meta').eq('id', workspaceId).single(),
     ]);
 
-    const { count: flowPRs } = await supabase
-      .from('flows')
+    const { count: openPrRuns } = await supabase
+      .from('workflow_runs')
       .select('*', { count: 'exact', head: true })
       .eq('workspace_id', workspaceId)
-      .eq('status', 'pr-opened');
+      .eq('workflow', 'autofix')
+      .not('pr_number', 'is', null);
 
     const { data: issues } = await supabase
       .from('issues')
@@ -41,7 +42,7 @@ export async function loadRepoStats(workspaceId: string): Promise<RepoStats | nu
     return {
       openIssues: openIssues ?? 0,
       closedIssues: closedIssues ?? 0,
-      openPRs: flowPRs ?? 0,
+      openPRs: openPrRuns ?? 0,
       digested,
       bugs,
       lastSyncedAt: (meta.lastSyncedAt as string) ?? null,

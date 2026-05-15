@@ -2,6 +2,7 @@ import type { z } from 'zod';
 import type { AgentBackend, AgentEvent } from '../agents/agent-runner.js';
 import type { Config } from '../config/config.model.js';
 import type { TokenBudget } from '../actions/autofix/token-budget.js';
+import type { IssueStore } from '../store/store.js';
 
 /**
  * The declarative workflow types (docs/REFACTOR-PLAN-agent-cockpit.md §3.1).
@@ -222,6 +223,14 @@ export interface WorkflowEffectDeps {
     commitAll(worktreePath: string, message: string): Promise<string | null>;
     getDiffAgainstBase(worktreePath: string, baseRef: string): Promise<string>;
   };
+  /**
+   * Read access to the workspace's issue store. Lets effect steps that need
+   * cross-issue context (the real `dedupe-check`, future `done-detector`
+   * sweeps, etc.) reach the knowledge base without re-fetching from GitHub.
+   * Effect steps SHOULD treat this as read-mostly — the engine doesn't `save()`
+   * between steps, so mutations would silently drop on the floor.
+   */
+  store: IssueStore;
 }
 
 // ─── Workflow ───────────────────────────────────────────────────────────────

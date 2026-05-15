@@ -2,7 +2,7 @@
 // Phase 1 will replace this with live badges + availability sourced from
 // `@cezar/core/actionRegistry` on the server.
 
-export type ActionGroup = 'triage' | 'intelligence' | 'community' | 'release';
+export type ActionGroup = 'triage' | 'intelligence' | 'community';
 
 export interface ActionTile {
   id: string;
@@ -21,8 +21,6 @@ export const ACTION_TILES: ActionTile[] = [
   { id: 'quality',             label: 'Quality Check',        icon: '✅', group: 'triage',       description: 'Assess issue quality and completeness' },
   { id: 'stale',               label: 'Stale Detection',      icon: '🕸️', group: 'triage',       description: 'Identify issues with no activity past threshold' },
   { id: 'done-detector',       label: 'Done Detector',        icon: '✔️', group: 'triage',       description: 'Detect issues that are resolved but not closed' },
-  { id: 'needs-response',      label: 'Needs Response',       icon: '💬', group: 'triage',       description: 'Flag issues awaiting maintainer reply' },
-  { id: 'issue-check',         label: 'Issue Check',          icon: '🔎', group: 'triage',       description: 'General issue health assessment' },
   { id: 'claim-detector',      label: 'Claim Detector',       icon: '🙋', group: 'triage',       description: 'Detect issues already claimed by contributors' },
   // Intelligence
   { id: 'priority',            label: 'Priority Assignment',  icon: '🎯', group: 'intelligence', description: 'Auto-classify urgency (P0–P3)' },
@@ -31,18 +29,14 @@ export const ACTION_TILES: ActionTile[] = [
   { id: 'recurring-questions', label: 'Recurring Questions',  icon: '🔄', group: 'intelligence', description: 'Detect frequently asked questions across issues' },
   { id: 'good-first-issue',    label: 'Good First Issue',     icon: '🌱', group: 'intelligence', description: 'Identify issues suitable for new contributors' },
   { id: 'security',            label: 'Security Triage',      icon: '🔒', group: 'intelligence', description: 'Flag potential security vulnerabilities' },
-  { id: 'milestone-planner',   label: 'Milestone Planner',    icon: '📅', group: 'intelligence', description: 'Suggest milestone assignments' },
   { id: 'bug-detector',        label: 'Bug Detector',         icon: '🐛', group: 'intelligence', description: 'Classify bug/feature/question/other — prerequisite for autofix', flag: 'prerequisite' },
   { id: 'autofix',             label: 'Autofix',              icon: '🔧', group: 'intelligence', description: 'Multi-agent coding pipeline: analyze → fix → review → PR',      flag: 'headline' },
   // Community
   { id: 'contributor-welcome', label: 'Contributor Welcome',  icon: '👋', group: 'community',    description: 'Welcome new contributors' },
-  // Release
-  { id: 'release-notes',       label: 'Release Notes',        icon: '📋', group: 'release',      description: 'Generate release notes from resolved issues' },
 ];
 
 export const ACTION_GROUP_LABELS: Record<ActionGroup, string> = {
   triage: 'Triage',
   intelligence: 'Intelligence',
   community: 'Community',
-  release: 'Release',
 };

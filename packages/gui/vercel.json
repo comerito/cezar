@@ -1,28 +1,8 @@
 {
   "crons": [
     {
-      "path": "/api/cron/ci-watch",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/ci-attribute",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/ci-fix",
-      "schedule": "* * * * *"
-    },
-    {
       "path": "/api/cron/issue-sync",
       "schedule": "*/5 * * * *"
-    },
-    {
-      "path": "/api/cron/issue-match",
-      "schedule": "* * * * *"
-    },
-    {
-      "path": "/api/cron/issue-fix",
-      "schedule": "* * * * *"
     },
     {
       "path": "/api/cron/dispatch",

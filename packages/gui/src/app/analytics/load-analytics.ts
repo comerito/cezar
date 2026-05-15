@@ -6,14 +6,15 @@ export interface WeekBucket {
   closed: number;
 }
 
-export interface FlowOutcomeBucket {
+export interface RunOutcomeBucket {
   status: string;
   count: number;
 }
 
 export interface CostEntry {
-  flowId: string;
-  issueNumber: number;
+  runId: string;
+  workflow: string;
+  issueNumber: number | null;
   tokensUsed: number;
   status: string;
   createdAt: string;
@@ -26,7 +27,7 @@ export interface DistributionEntry {
 
 export interface AnalyticsData {
   velocity: WeekBucket[];
-  flowOutcomes: FlowOutcomeBucket[];
+  runOutcomes: RunOutcomeBucket[];
   costs: CostEntry[];
   totalTokens: number;
   priorityDist: DistributionEntry[];
@@ -38,35 +39,33 @@ export async function loadAnalytics(workspaceId: string): Promise<AnalyticsData 
   try {
     const supabase = await createSupabaseServerClient();
 
-    const [{ data: issues }, { data: flows }] = await Promise.all([
+    const [{ data: issues }, { data: runs }] = await Promise.all([
       supabase.from('issues').select('number, state, labels, analysis, created_at').eq('workspace_id', workspaceId),
-      supabase.from('flows').select('id, issue_number, status, outcome, created_at').eq('workspace_id', workspaceId).order('created_at', { ascending: false }),
+      supabase.from('workflow_runs').select('id, workflow, issue_number, status, tokens_used, started_at').eq('workspace_id', workspaceId).order('started_at', { ascending: false }),
     ]);
 
     const allIssues = issues ?? [];
-    const allFlows = flows ?? [];
+    const allRuns = runs ?? [];
 
     // Velocity: issues opened per week (last 12 weeks)
     const velocity = buildVelocity(allIssues);
 
-    // Flow outcomes
+    // Run outcomes
     const outcomeCounts = new Map<string, number>();
-    for (const f of allFlows) {
-      outcomeCounts.set(f.status, (outcomeCounts.get(f.status) ?? 0) + 1);
+    for (const r of allRuns) {
+      outcomeCounts.set(r.status, (outcomeCounts.get(r.status) ?? 0) + 1);
     }
-    const flowOutcomes = [...outcomeCounts.entries()].map(([status, count]) => ({ status, count }));
+    const runOutcomes = [...outcomeCounts.entries()].map(([status, count]) => ({ status, count }));
 
     // Cost tracking
-    const costs: CostEntry[] = allFlows.map((f) => {
-      const outcome = f.outcome as any;
-      return {
-        flowId: f.id,
-        issueNumber: f.issue_number,
-        tokensUsed: outcome?.tokensUsed ?? 0,
-        status: f.status,
-        createdAt: f.created_at,
-      };
-    });
+    const costs: CostEntry[] = allRuns.map((r) => ({
+      runId: r.id,
+      workflow: r.workflow,
+      issueNumber: r.issue_number,
+      tokensUsed: r.tokens_used ?? 0,
+      status: r.status,
+      createdAt: r.started_at ?? '',
+    }));
     const totalTokens = costs.reduce((s, c) => s + c.tokensUsed, 0);
 
     // Priority distribution
@@ -98,7 +97,7 @@ export async function loadAnalytics(workspaceId: string): Promise<AnalyticsData 
       .sort((a, b) => b.count - a.count)
       .slice(0, 12);
 
-    return { velocity, flowOutcomes, costs, totalTokens, priorityDist, typeDist, labelDist };
+    return { velocity, runOutcomes, costs, totalTokens, priorityDist, typeDist, labelDist };
   } catch {
     return null;
   }
