@@ -10,8 +10,8 @@ import {
   StatusDotIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
-  MoreVerticalIcon,
 } from '@/components/icons';
+import { ActionRowMenu } from '@/components/action-row-menu';
 import { seedDefaultsForCurrentWorkspace } from './actions-page-actions';
 
 export interface ActionRow {
@@ -28,6 +28,8 @@ export interface ActionRow {
   replacesBuiltIn: string | null;
   /** True when a built-in with the same name still exists alongside a user override. */
   hasBuiltinShadow: boolean;
+  /** True when this row is a built-in AND a user-kind sibling overriding it exists. */
+  hasUserOverride: boolean;
 }
 
 interface ActionsViewProps {
@@ -320,6 +322,7 @@ export function ActionsView({ rows, readOnly, autoTriageActionId }: ActionsViewP
                     key={row.name}
                     row={row}
                     isAutoTriage={row.id === autoTriageActionId}
+                    readOnly={readOnly}
                   />
                 ))
               )}
@@ -503,8 +506,23 @@ function compareByKey(a: ActionRow, b: ActionRow, key: SortKey): number {
   return cmp === 0 ? a.name.localeCompare(b.name) : cmp;
 }
 
-function ActionTableRow({ row, isAutoTriage }: { row: ActionRow; isAutoTriage: boolean }) {
+function ActionTableRow({
+  row,
+  isAutoTriage,
+  readOnly,
+}: {
+  row: ActionRow;
+  isAutoTriage: boolean;
+  readOnly: boolean;
+}) {
   const href = `/actions/${encodeURIComponent(row.name)}`;
+  // Optimistic mirror of the row's status so the kebab toggle updates the pill
+  // before the server round-trip + `router.refresh()` completes.
+  const [enabled, setEnabled] = useState(row.status === 'enabled');
+  useEffect(() => {
+    setEnabled(row.status === 'enabled');
+  }, [row.status]);
+
   return (
     <tr className="border-t border-outline-variant/60 hover:bg-surface-container/60">
       <td className="px-6 py-4 align-middle">
@@ -537,22 +555,26 @@ function ActionTableRow({ row, isAutoTriage }: { row: ActionRow; isAutoTriage: b
       </td>
       <td className="px-6 py-4 align-middle">
         <span className="inline-flex items-center gap-2 text-on-surface">
-          <StatusDotIcon className="h-2.5 w-2.5" tone={row.status === 'enabled' ? 'enabled' : 'disabled'} />
-          <span className="font-mono text-[13px]">{row.status}</span>
+          <StatusDotIcon className="h-2.5 w-2.5" tone={enabled ? 'enabled' : 'disabled'} />
+          <span className="font-mono text-[13px]">{enabled ? 'enabled' : 'disabled'}</span>
         </span>
       </td>
       <td className="px-6 py-4 align-middle">
         <span className="font-mono text-[13px] text-on-surface-variant">{formatRelative(row.updatedAt)}</span>
       </td>
-      <td className="px-6 py-4 align-middle">
+      <td className="relative px-6 py-4 align-middle">
         <div className="flex items-center justify-end pr-2">
-          <button
-            type="button"
-            aria-label={`${row.name} actions`}
-            className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface"
-          >
-            <MoreVerticalIcon className="h-4 w-4" />
-          </button>
+          <ActionRowMenu
+            id={row.id}
+            name={row.name}
+            kind={row.kind}
+            target={row.target}
+            enabled={enabled}
+            isAutoTriage={isAutoTriage}
+            hasUserOverride={row.hasUserOverride}
+            readOnly={readOnly}
+            onEnabledChange={setEnabled}
+          />
         </div>
       </td>
     </tr>

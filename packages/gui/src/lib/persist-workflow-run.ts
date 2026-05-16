@@ -7,7 +7,7 @@ type AgentRunsRow = Database['public']['Tables']['agent_runs']['Row'];
 export interface CreateWorkflowRunOpts {
   workspaceId: string;
   jobId?: string | null;
-  workflow: 'autofix' | 'ci-followup' | 'triage';
+  workflow: 'autofix' | 'ci-followup' | 'triage' | 'single-action';
   repo: string | null;
   issueNumber: number | null;
   prNumber?: number | null;

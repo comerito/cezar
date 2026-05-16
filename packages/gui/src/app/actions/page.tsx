@@ -65,11 +65,21 @@ export default async function ActionsPage() {
     byName.set(r.name, list);
   }
 
+  // Also index user rows by `replaces_built_in` so a row keeps its override
+  // signal even when the user override was renamed (which can't happen today,
+  // but the data model allows it).
+  const overrideTargets = new Set<string>();
+  for (const r of actionRows ?? []) {
+    if (r.kind === 'user' && r.replaces_built_in) overrideTargets.add(r.replaces_built_in);
+  }
+
   const rows: ActionRow[] = [];
   for (const [name, list] of byName) {
     const user = list.find((r) => r.kind === 'user');
     const preferred = user ?? list[0];
     const hasBuiltinShadow = user !== undefined && list.some((r) => r.kind === 'built-in');
+    const hasUserOverride =
+      preferred.kind === 'built-in' && (list.some((r) => r.kind === 'user') || overrideTargets.has(name));
     rows.push({
       id: preferred.id,
       name,
@@ -82,6 +92,7 @@ export default async function ActionsPage() {
       updatedAt: preferred.updated_at,
       replacesBuiltIn: preferred.replaces_built_in,
       hasBuiltinShadow,
+      hasUserOverride,
     });
   }
   rows.sort((a, b) => a.name.localeCompare(b.name));

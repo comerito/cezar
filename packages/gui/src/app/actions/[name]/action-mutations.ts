@@ -300,10 +300,11 @@ export async function deleteAction(name: string): Promise<SaveActionResult> {
 }
 
 /**
- * Point `workspaces.auto_triage_action_id` at the supplied action. Caller is
- * responsible for picking an `issue`-targeted action.
+ * Point `workspaces.auto_triage_action_id` at the supplied action, or null
+ * to clear the assignment. Caller is responsible for picking an
+ * `issue`-targeted action when setting.
  */
-export async function setAutoTriage(actionId: string): Promise<SaveActionResult> {
+export async function setAutoTriage(actionId: string | null): Promise<SaveActionResult> {
   const auth = await requireAdminWorkspace();
   if ('error' in auth) return { ok: false, error: auth.error };
   const { workspace } = auth;
@@ -317,6 +318,162 @@ export async function setAutoTriage(actionId: string): Promise<SaveActionResult>
   revalidatePath('/actions');
   revalidatePath('/settings');
   return { ok: true };
+}
+
+export async function clearAutoTriage(): Promise<SaveActionResult> {
+  return setAutoTriage(null);
+}
+
+interface SourceActionFields {
+  description: string | null;
+  system_prompt: string;
+  skill_refs: unknown;
+  target: 'issue' | 'pr';
+  triggers: unknown;
+  effects: unknown;
+  output_schema: unknown;
+}
+
+/**
+ * Create a `kind='user'` sibling of a built-in action, copying all editable
+ * fields and tagging the new row with `replaces_built_in = name`. Fails if
+ * no built-in exists for the name, or if a user override already does.
+ * Returns the new row's name (same as the built-in) so the caller can
+ * navigate to its detail page.
+ */
+export async function overrideBuiltInAction(
+  name: string,
+): Promise<SaveActionResult & { slug?: string }> {
+  const auth = await requireAdminWorkspace();
+  if ('error' in auth) return { ok: false, error: auth.error };
+  const { user, workspace } = auth;
+
+  const supabase = createSupabaseAdminClient();
+  const current = await loadCurrentRows(workspace.id, name);
+  if (!current.builtin) return { ok: false, error: `No built-in action named ${name}` };
+  if (current.user) return { ok: false, error: 'A user override already exists for this action' };
+
+  const { data: source, error: sourceErr } = await supabase
+    .from('actions')
+    .select('description, system_prompt, skill_refs, target, triggers, effects, output_schema')
+    .eq('id', current.builtin.id)
+    .single<SourceActionFields>();
+  if (sourceErr || !source) {
+    return { ok: false, error: sourceErr?.message ?? 'Could not load built-in to override' };
+  }
+
+  const { data, error } = await supabase
+    .from('actions')
+    .insert({
+      workspace_id: workspace.id,
+      name,
+      kind: 'user',
+      replaces_built_in: name,
+      description: source.description,
+      system_prompt: source.system_prompt,
+      skill_refs: source.skill_refs as never,
+      target: source.target,
+      triggers: source.triggers as never,
+      effects: source.effects as never,
+      output_schema: source.output_schema as never,
+      enabled: true,
+      created_by: user.id,
+      updated_by: user.id,
+    })
+    .select('updated_at')
+    .single();
+  if (error) return { ok: false, error: error.message };
+  revalidateAction(name);
+  return { ok: true, updatedAt: data?.updated_at ?? undefined, slug: name };
+}
+
+/**
+ * Delete the user override row for a built-in, restoring the built-in's
+ * stored configuration as the live row.
+ */
+export async function resetBuiltInToDefault(name: string): Promise<SaveActionResult> {
+  const auth = await requireAdminWorkspace();
+  if ('error' in auth) return { ok: false, error: auth.error };
+  const { workspace } = auth;
+
+  const supabase = createSupabaseAdminClient();
+  const current = await loadCurrentRows(workspace.id, name);
+  if (!current.user) return { ok: false, error: 'No user override exists for this action' };
+  if (!current.builtin) return { ok: false, error: 'No built-in to restore — use Delete instead' };
+
+  const { error } = await supabase
+    .from('actions')
+    .delete()
+    .eq('id', current.user.id);
+  if (error) return { ok: false, error: error.message };
+  revalidateAction(name);
+  return { ok: true };
+}
+
+/**
+ * Clone an action (built-in or user) as a fresh `kind='user'` row with a
+ * `-copy[-N]` suffix that doesn't collide with the existing user rows.
+ * Returns the new row's name so the caller can navigate to its detail page.
+ */
+export async function duplicateAction(name: string): Promise<SaveActionResult & { newName?: string }> {
+  const auth = await requireAdminWorkspace();
+  if ('error' in auth) return { ok: false, error: auth.error };
+  const { user, workspace } = auth;
+
+  const supabase = createSupabaseAdminClient();
+  const current = await loadCurrentRows(workspace.id, name);
+  const sourceRow = current.user ?? current.builtin;
+  if (!sourceRow) return { ok: false, error: `No action named ${name} in this workspace` };
+
+  const { data: source, error: sourceErr } = await supabase
+    .from('actions')
+    .select('description, system_prompt, skill_refs, target, triggers, effects, output_schema')
+    .eq('id', sourceRow.id)
+    .single<SourceActionFields>();
+  if (sourceErr || !source) {
+    return { ok: false, error: sourceErr?.message ?? 'Could not load source action to duplicate' };
+  }
+
+  const { data: existing } = await supabase
+    .from('actions')
+    .select('name, kind')
+    .eq('workspace_id', workspace.id)
+    .like('name', `${name}-copy%`);
+  const takenUserNames = new Set(
+    (existing ?? [])
+      .filter((r) => r.kind === 'user')
+      .map((r) => r.name as string),
+  );
+
+  let candidate = `${name}-copy`;
+  let suffix = 2;
+  while (takenUserNames.has(candidate)) {
+    candidate = `${name}-copy-${suffix}`;
+    suffix += 1;
+  }
+
+  const { error } = await supabase
+    .from('actions')
+    .insert({
+      workspace_id: workspace.id,
+      name: candidate,
+      kind: 'user',
+      replaces_built_in: null,
+      description: source.description,
+      system_prompt: source.system_prompt,
+      skill_refs: source.skill_refs as never,
+      target: source.target,
+      triggers: source.triggers as never,
+      effects: source.effects as never,
+      output_schema: source.output_schema as never,
+      enabled: true,
+      created_by: user.id,
+      updated_by: user.id,
+    });
+  if (error) return { ok: false, error: error.message };
+  revalidatePath('/actions');
+  revalidatePath(`/actions/${encodeURIComponent(candidate)}`);
+  return { ok: true, newName: candidate };
 }
 
 /**
