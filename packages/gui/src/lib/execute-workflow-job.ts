@@ -2,9 +2,9 @@ import type { SupabaseClient } from '@supabase/supabase-js';
 import type { CiFollowupInput } from '@cezar/core';
 import { SupabaseStoreAdapter } from './adapters/supabase-store';
 import { loadWorkspaceConfig } from './load-workspace-config';
-import { maybeEnqueueAutofixFromTriage } from './maybe-enqueue-autofix-from-triage';
 import { createWorkflowRunPersister, type WorkflowRunPersister } from './persist-workflow-run';
 import { ensureRepoClone } from './repo-clone';
+import { runTriagePassJob } from './run-triage-pass-job';
 import type { Database } from './supabase/types';
 
 type WorkflowKind = 'autofix' | 'ci-followup' | 'triage';
@@ -174,63 +174,25 @@ export async function executeWorkflowJob(
       headSha = 'headSha' in outcome ? outcome.headSha ?? null : null;
       outPrNumber = ciFollowupSeed.prNumber ?? outPrNumber;
     } else {
-      // triage — repo-less classification workflow (docs §3.2). The blackboard
-      // ends carrying route/isBug/priority; we lift those into `outcome` so the
-      // autofix-enqueue helper (below) — and the runner-finalize PATCH route —
-      // can decide whether to queue an autofix job.
-      const result = await core.runWorkflow(core.triageWorkflow, {
-        store,
-        config,
-        github,
+      // Phase 2b1 soft cutover — triage runs the data-driven `runTriagePass`
+      // instead of the legacy `triageWorkflow`. The action set (auto-triage
+      // first, then every other enabled action whose target+trigger match) is
+      // loaded from the `actions` table. The follow-up autofix enqueue that
+      // the old path performed via `maybeEnqueueAutofixFromTriage` is
+      // intentionally not wired here — the new actions emit labels via
+      // effects, not a structured `route` outcome; a routing action that
+      // produces that signal is the next deliverable.
+      const triageResult = await runTriagePassJob({
+        workspaceId,
         issueNumber: runIssueNumber,
-        apply: true,
-        bindings: config.workflow?.bindings,
-        settings: config.workflow?.settings,
-        onEvent,
-        onAgentEvent: undefined,
-        onRunRecord,
-        pauseRequested,
-        cancelRequested,
+        github,
+        supabase: adminSupabase,
+        persister,
       });
-      const triageOutcome = core.triageOutcomeFromBlackboard(result.blackboard);
-      outcomeJson = { status: result.status, reason: result.reason, ...triageOutcome };
-      runStatus =
-        result.status === 'succeeded' ? 'succeeded'
-        : result.status === 'paused' ? 'paused'
-        : result.status === 'cancelled' ? 'cancelled'
-        : 'failed';
-      reason = result.reason;
-      tokensUsed = result.tokensUsed;
-      if (runStatus === 'succeeded') {
-        // Persist the triage classification back to the issue's analysis so the
-        // follow-up autofix dispatch — which loads the store fresh and gates on
-        // `issue.analysis.issueType === 'bug'` (and `bugConfidence ≥ threshold`)
-        // in `AutofixOrchestrator.processIssueViaEngine` — actually proceeds.
-        // Without this, every triage→autofix handoff short-circuits as
-        // "not classified as a bug" with 0 steps. Must save BEFORE enqueueing.
-        try {
-          const nowIso = new Date().toISOString();
-          store.setAnalysis(runIssueNumber, {
-            issueType: triageOutcome.issueType,
-            bugConfidence: triageOutcome.bugConfidence,
-            bugReason: triageOutcome.bugReason,
-            bugAnalyzedAt: nowIso,
-            priority: triageOutcome.priority,
-            priorityReason: triageOutcome.priorityReason,
-            priorityAnalyzedAt: triageOutcome.priority ? nowIso : null,
-          });
-          await store.save();
-        } catch (err) {
-          console.error('[dispatch] persist triage analysis failed:', err instanceof Error ? err.message : err);
-        }
-        await maybeEnqueueAutofixFromTriage(adminSupabase, {
-          workspaceId,
-          repo: repoSlug,
-          issueNumber: runIssueNumber,
-          outcome: triageOutcome,
-          workspaceConfig: config,
-        });
-      }
+      outcomeJson = triageResult.outcome;
+      runStatus = triageResult.status as RunStatus;
+      reason = triageResult.reason;
+      tokensUsed = triageResult.tokensUsed;
     }
 
     // The engine path doesn't surface tokensUsed through the autofix outcome,

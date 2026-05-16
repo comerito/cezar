@@ -15,3 +15,10 @@ export {
   type EffectContext,
   type EffectName,
 } from './effects.js';
+export { loadActionByName, loadAutoTriageAction, listEnabledActions } from './loader.js';
+export {
+  runTriagePass,
+  type TriagePassOptions,
+  type TriagePassActionResult,
+  type TriagePassResult,
+} from './triage-pass.js';

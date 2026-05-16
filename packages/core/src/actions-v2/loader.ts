@@ -1,0 +1,160 @@
+import type { ActionDef, ActionTrigger } from './action.js';
+import type { EffectName } from './effects.js';
+
+/**
+ * The DB row shape for the `actions` table. Typed locally against the subset
+ * of columns we read so `@cezar/core` stays free of the GUI's generated
+ * Supabase types — callers pass the typed client as `unknown`.
+ */
+interface ActionRow {
+  id: string;
+  workspace_id: string;
+  name: string;
+  kind: 'built-in' | 'user';
+  description: string | null;
+  system_prompt: string;
+  skill_refs: unknown;
+  target: 'issue' | 'pr';
+  triggers: unknown;
+  effects: unknown;
+  output_schema: unknown;
+  enabled: boolean;
+}
+
+const ACTION_COLUMNS =
+  'id, workspace_id, name, kind, description, system_prompt, skill_refs, target, triggers, effects, output_schema, enabled';
+
+interface QueryResult<T> {
+  data: T | null;
+  error: { message: string } | null;
+}
+
+/**
+ * Loose chainable builder. The real Supabase types are generic and don't
+ * cleanly survive going through `unknown` at the package boundary; modelling
+ * just the shape we use (and `then`-ing the builder as a thenable to await
+ * the underlying result) is simpler than threading the full generic.
+ */
+interface Querylike<TRow> {
+  eq(col: string, value: unknown): Querylike<TRow>;
+  order(col: string, opts?: { ascending?: boolean }): Querylike<TRow>;
+  maybeSingle(): Promise<QueryResult<TRow>>;
+  then<TResult1 = QueryResult<TRow[]>, TResult2 = never>(
+    onfulfilled?: ((value: QueryResult<TRow[]>) => TResult1 | PromiseLike<TResult1>) | null,
+    onrejected?: ((reason: unknown) => TResult2 | PromiseLike<TResult2>) | null,
+  ): Promise<TResult1 | TResult2>;
+}
+
+interface FromBuilderLike {
+  select(cols: string): Querylike<ActionRow>;
+}
+
+interface LooseSupabase {
+  from(table: string): FromBuilderLike;
+}
+
+function asStringArray(value: unknown): string[] {
+  if (!Array.isArray(value)) return [];
+  return value.filter((v): v is string => typeof v === 'string');
+}
+
+function rowToAction(row: ActionRow): ActionDef {
+  return {
+    id: row.id,
+    workspaceId: row.workspace_id,
+    name: row.name,
+    kind: row.kind,
+    description: row.description,
+    systemPrompt: row.system_prompt,
+    skillRefs: asStringArray(row.skill_refs),
+    target: row.target,
+    triggers: asStringArray(row.triggers) as ActionTrigger[],
+    effects: row.effects == null ? null : (asStringArray(row.effects) as EffectName[]),
+    outputSchema:
+      row.output_schema && typeof row.output_schema === 'object' && !Array.isArray(row.output_schema)
+        ? (row.output_schema as Record<string, unknown>)
+        : null,
+    enabled: row.enabled,
+  };
+}
+
+/**
+ * Look up a single Action by `(workspace_id, name)`. Returns null when the
+ * row is absent — callers decide whether that's a hard error.
+ */
+export async function loadActionByName(
+  supabase: unknown,
+  workspaceId: string,
+  name: string,
+): Promise<ActionDef | null> {
+  const sb = supabase as LooseSupabase;
+  const { data, error } = await sb
+    .from('actions')
+    .select(ACTION_COLUMNS)
+    .eq('workspace_id', workspaceId)
+    .eq('name', name)
+    .maybeSingle();
+  if (error) throw new Error(`loadActionByName(${name}) failed: ${error.message}`);
+  return data ? rowToAction(data) : null;
+}
+
+/**
+ * Look up the workspace's auto-triage Action via `workspaces.auto_triage_action_id`.
+ * Returns null when the workspace has no auto-triage action pointer set.
+ */
+export async function loadAutoTriageAction(
+  supabase: unknown,
+  workspaceId: string,
+): Promise<ActionDef | null> {
+  const sb = supabase as unknown as {
+    from(table: 'workspaces'): {
+      select(cols: 'auto_triage_action_id'): {
+        eq(col: 'id', value: string): {
+          maybeSingle(): Promise<QueryResult<{ auto_triage_action_id: string | null }>>;
+        };
+      };
+    };
+  };
+  const { data, error } = await sb
+    .from('workspaces')
+    .select('auto_triage_action_id')
+    .eq('id', workspaceId)
+    .maybeSingle();
+  if (error) throw new Error(`loadAutoTriageAction lookup failed: ${error.message}`);
+  if (!data?.auto_triage_action_id) return null;
+
+  const actionsSb = supabase as LooseSupabase;
+  const { data: row, error: rowErr } = await actionsSb
+    .from('actions')
+    .select(ACTION_COLUMNS)
+    .eq('id', data.auto_triage_action_id)
+    .maybeSingle();
+  if (rowErr) throw new Error(`loadAutoTriageAction fetch failed: ${rowErr.message}`);
+  return row ? rowToAction(row) : null;
+}
+
+/**
+ * List enabled actions for a workspace, optionally filtered by `target`
+ * and/or matching `trigger`. Triggers live in the row's jsonb `triggers`
+ * array; we fetch the row set then filter in JS — the per-workspace action
+ * set is small (≤30) so the trade-off favours code simplicity over a
+ * trickier PostgREST array-contains query.
+ */
+export async function listEnabledActions(
+  supabase: unknown,
+  workspaceId: string,
+  filter?: { target?: 'issue' | 'pr'; trigger?: ActionTrigger },
+): Promise<ActionDef[]> {
+  const sb = supabase as LooseSupabase;
+  const { data, error } = await sb
+    .from('actions')
+    .select(ACTION_COLUMNS)
+    .eq('workspace_id', workspaceId)
+    .eq('enabled', true)
+    .order('name', { ascending: true });
+  if (error) throw new Error(`listEnabledActions failed: ${error.message}`);
+  let rows = (data ?? []).map(rowToAction);
+  if (filter?.target) rows = rows.filter((a) => a.target === filter.target);
+  if (filter?.trigger) rows = rows.filter((a) => a.triggers.includes(filter.trigger!));
+  return rows;
+}

@@ -150,6 +150,10 @@ export {
   ALL_EFFECT_NAMES,
   executeEffect,
   effectsAsAnthropicTools,
+  loadActionByName,
+  loadAutoTriageAction,
+  listEnabledActions,
+  runTriagePass,
   type ActionDef,
   type ActionTrigger,
   type ActionRunResult,
@@ -159,6 +163,9 @@ export {
   type EffectCall,
   type EffectContext,
   type EffectName,
+  type TriagePassOptions,
+  type TriagePassActionResult,
+  type TriagePassResult,
 } from './actions-v2/index.js';
 
 // Workflow bindings (Phase 1a) — the binding model + resolution chain.

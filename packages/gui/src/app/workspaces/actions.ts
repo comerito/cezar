@@ -53,6 +53,17 @@ export async function createWorkspace(
     return { error: `Workspace created but failed to add you as admin: ${memErr.message}` };
   }
 
+  // Seed the data-driven default Action set (15 built-in actions + auto-triage
+  // pointer). Idempotent on the SQL side — safe if the workspace already has
+  // some actions. Failure here is non-fatal: the workspace is usable without
+  // actions, the user can hit a "seed defaults" button from the cockpit later.
+  const { error: seedErr } = await supabase.rpc('seed_default_actions', {
+    p_workspace_id: workspace.id,
+  });
+  if (seedErr) {
+    console.error('[createWorkspace] seed_default_actions failed:', seedErr.message);
+  }
+
   await setActiveWorkspace(workspace.id);
   redirect('/dashboard');
 }
