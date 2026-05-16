@@ -1,17 +1,17 @@
-import { select } from '@inquirer/prompts';
+import { select, input, confirm } from '@inquirer/prompts';
 import chalk from 'chalk';
 import { clearScreen, renderLogo } from './logo.js';
 import { renderStatusBox } from './status.js';
 import { runSetupWizard } from './setup.js';
 import { IssueStore } from '@cezar/core';
-import type { Config } from '@cezar/core';
+import type { ActionDef, Config } from '@cezar/core';
 import { syncCommand } from '../commands/sync.js';
+import {
+  loadActionCatalog,
+  runActionAcrossIssues,
+  type IssueScope,
+} from '../utils/cli-action-runner.js';
 
-/**
- * Interactive hub — trimmed in commit 2b2 alongside the legacy action-plugin
- * deletion. Currently exposes only init/sync/exit; the action menu will be
- * rebuilt on the new data-driven model in commit 2b3.
- */
 export async function launchHub(store: IssueStore | null, config: Config): Promise<void> {
   if (!store) {
     clearScreen();
@@ -28,24 +28,101 @@ export async function launchHub(store: IssueStore | null, config: Config): Promi
     clearScreen();
     renderLogo();
     renderStatusBox(store);
-    console.log(chalk.dim('\nThe CLI action menu is being rebuilt on the data-driven action model (commit 2b3).'));
-    console.log(chalk.dim('Use the web cockpit to launch actions in the meantime.\n'));
 
-    const selected = await select({
+    const choice = await select({
       message: 'What would you like to do?',
       choices: [
+        { name: '▶  Run an action', value: 'run' },
         { name: '🔄  Sync with GitHub', value: 'sync' },
         { name: '✕   Exit', value: 'exit' },
       ],
     });
 
-    if (selected === 'exit') return;
+    if (choice === 'exit') return;
 
-    if (selected === 'sync') {
+    if (choice === 'sync') {
       await syncCommand({}, config);
-      store = await IssueStore.loadOrNull(config.store.path);
-      if (!store) return;
+      const reloaded = await IssueStore.loadOrNull(config.store.path);
+      if (!reloaded) return;
+      store = reloaded;
       continue;
     }
+
+    if (choice === 'run') {
+      await runActionFlow(config);
+      console.log(chalk.dim('\n  Press Enter to continue.'));
+      await input({ message: '' }).catch(() => '');
+    }
   }
+}
+
+async function runActionFlow(config: Config): Promise<void> {
+  const catalog = await loadActionCatalog();
+  if (catalog.length === 0) {
+    console.log(chalk.yellow('  No actions available.'));
+    return;
+  }
+
+  const byTarget = groupByTarget(catalog);
+  const choices: Array<{ name: string; value: string }> = [];
+  for (const target of ['issue', 'pr'] as const) {
+    const actions = byTarget.get(target) ?? [];
+    if (actions.length === 0) continue;
+    choices.push({ name: chalk.dim(`── ${target} ──`), value: `__heading_${target}` });
+    for (const a of actions) {
+      const desc = a.description ? chalk.dim(` — ${a.description}`) : '';
+      choices.push({ name: `${a.name}${desc}`, value: a.name });
+    }
+  }
+  choices.push({ name: chalk.dim('← Back'), value: '__back' });
+
+  const actionName = await select({
+    message: 'Pick an action',
+    choices,
+    pageSize: 18,
+  });
+  if (actionName === '__back' || actionName.startsWith('__heading_')) return;
+  const action = catalog.find((a) => a.name === actionName);
+  if (!action) return;
+
+  const scopeKind = await select<'unanalyzed' | 'all' | 'single' | '__back'>({
+    message: 'Scope',
+    choices: [
+      { name: 'Unanalyzed only', value: 'unanalyzed' },
+      { name: 'All issues', value: 'all' },
+      { name: 'Single issue by number', value: 'single' },
+      { name: chalk.dim('← Back'), value: '__back' },
+    ],
+  });
+  if (scopeKind === '__back') return;
+
+  let scope: IssueScope;
+  if (scopeKind === 'single') {
+    const n = await input({
+      message: 'Issue number',
+      validate: (v) => /^\d+$/.test(v.trim()) || 'Enter a positive integer',
+    });
+    scope = { kind: 'single', number: parseInt(n.trim(), 10) };
+  } else if (scopeKind === 'all') {
+    scope = { kind: 'all' };
+  } else {
+    scope = { kind: 'unanalyzed' };
+  }
+
+  const apply = await confirm({
+    message: 'Apply effects to GitHub? (No = dry-run, prints what would happen.)',
+    default: false,
+  });
+
+  await runActionAcrossIssues(action, { scope, apply, dryRun: !apply }, config);
+}
+
+function groupByTarget(catalog: ActionDef[]): Map<'issue' | 'pr', ActionDef[]> {
+  const out = new Map<'issue' | 'pr', ActionDef[]>();
+  for (const a of catalog) {
+    const list = out.get(a.target) ?? [];
+    list.push(a);
+    out.set(a.target, list);
+  }
+  return out;
 }

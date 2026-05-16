@@ -1,27 +1,41 @@
 import chalk from 'chalk';
 import type { Config } from '@cezar/core';
+import {
+  loadActionCatalog,
+  runActionAcrossIssues,
+  type IssueScope,
+} from '../utils/cli-action-runner.js';
 
 interface RunOptions {
-  state?: string;
-  recheck?: boolean;
+  all?: boolean;
+  unanalyzed?: boolean;
+  issue?: number;
   apply?: boolean;
   dryRun?: boolean;
-  format?: string;
-  interactive?: boolean;
-  description?: string;
-  issue?: number;
-  maxIssues?: number;
-  retry?: boolean;
 }
 
-/**
- * Stubbed in commit 2b2 when the legacy `@cezar/core` action-plugin tree was
- * deleted. The CLI is being rewritten on the data-driven action model in
- * commit 2b3 — until then, `cezar run <action>` reports a deprecation
- * message and exits non-zero.
- */
-export async function runCommand(actionId: string, _opts: RunOptions, _config: Config): Promise<void> {
-  console.error(chalk.yellow(`'cezar run ${actionId}' is being rewritten on the new data-driven action model — coming in the next release.`));
-  console.error(chalk.dim('For now, use the web cockpit to launch actions.'));
-  process.exit(1);
+export async function runCommand(actionName: string, opts: RunOptions, config: Config): Promise<void> {
+  const catalog = await loadActionCatalog();
+  const action = catalog.find((a) => a.name === actionName);
+  if (!action) {
+    console.error(chalk.red(`Unknown action: ${actionName}\n`));
+    console.error(chalk.dim('Available actions:'));
+    for (const a of catalog) {
+      console.error(chalk.dim(`  ${a.name.padEnd(22)} ${a.description ?? ''}`));
+    }
+    process.exit(1);
+  }
+
+  const scope: IssueScope = opts.issue != null
+    ? { kind: 'single', number: opts.issue }
+    : opts.all
+      ? { kind: 'all' }
+      : { kind: 'unanalyzed' };
+
+  const result = await runActionAcrossIssues(
+    action,
+    { scope, apply: opts.apply === true, dryRun: opts.dryRun === true },
+    config,
+  );
+  if (result.failed > 0) process.exit(1);
 }

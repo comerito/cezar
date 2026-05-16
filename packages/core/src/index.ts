@@ -115,6 +115,7 @@ export {
   loadActionByName,
   loadAutoTriageAction,
   listEnabledActions,
+  DEFAULT_ACTIONS,
   runTriagePass,
   type ActionDef,
   type ActionTrigger,

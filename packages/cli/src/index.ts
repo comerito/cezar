@@ -52,19 +52,15 @@ program.command('status')
   });
 
 program.command('run <action>')
-  .description('Run an analysis action — being rewritten on the new data-driven action model (commit 2b3)')
-  .option('--state <state>', 'open|closed|all', 'open')
-  .option('--recheck', 'Re-analyze already-analyzed issues')
-  .option('--apply', 'Apply results to GitHub immediately')
-  .option('--dry-run', 'Show what would happen without writing')
-  .option('--format <format>', 'table|json|markdown', 'table')
-  .option('--no-interactive', 'Force non-interactive mode')
-  .option('--issue <n>', 'Target a single issue number (for autofix)', v => parseInt(v, 10))
-  .option('--max-issues <n>', 'Limit how many issues to process (for autofix)', v => parseInt(v, 10))
-  .option('--retry', 'Reset attempt counter before running (autofix): lets a previously-exhausted issue be re-tried')
-  .action(async (actionId, opts) => {
+  .description('Run a data-driven Action against issues in the local store')
+  .option('--all', 'Run against every issue in the store')
+  .option('--unanalyzed', 'Run only against issues without prior analysis for this action (default)')
+  .option('--issue <n>', 'Target a single issue number', v => parseInt(v, 10))
+  .option('--apply', 'Apply effects to GitHub (default is dry-run)')
+  .option('--dry-run', 'Force dry-run; never write to GitHub')
+  .action(async (actionName, opts) => {
     const config = await loadConfig();
-    await runCommand(actionId, opts, config);
+    await runCommand(actionName, opts, config);
   });
 
 program.command('runs [id]')
