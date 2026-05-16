@@ -1,6 +1,12 @@
 import { z } from 'zod';
 import type { StoredIssue } from '../../store/store.model.js';
 
+/**
+ * Done-detector prompt + schema, scoped to the autofix preflight. Previously
+ * lived under `actions/done-detector/`; inlined here when the legacy action
+ * plugins were retired (commit 2b2) so the orchestrator stays self-contained.
+ */
+
 export const DoneDetectorResponseSchema = z.object({
   results: z.array(z.object({
     number: z.number(),

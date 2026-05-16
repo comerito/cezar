@@ -9,7 +9,7 @@ import { TokenBudget } from './token-budget.js';
 import { runAgentSession, type AgentEvent } from './agent-session.js';
 import type { AgentEvent as NormalizedAgentEvent } from '../../agents/agent-runner.js';
 import { LLMService } from '../../services/llm.service.js';
-import { buildDoneDetectorPrompt, DoneDetectorResponseSchema } from '../done-detector/prompt.js';
+import { buildDoneDetectorPrompt, DoneDetectorResponseSchema } from './done-detector-preflight.js';
 import { ANALYZER_SYSTEM_PROMPT, AnalyzerResultSchema, isNoActionNeeded, buildAnalyzerUserPrompt, type RootCause } from './prompts/analyzer.js';
 import { FIXER_SYSTEM_PROMPT, FixReportSchema, buildFixerUserPrompt, type FixReport } from './prompts/fixer.js';
 import { REVIEWER_SYSTEM_PROMPT, ReviewVerdictSchema, buildReviewerUserPrompt, normalizeVerdict, retryNotesFromVerdict, fallbackVerdictFromProse, type ReviewVerdict } from './prompts/reviewer.js';

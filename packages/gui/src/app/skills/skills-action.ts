@@ -97,7 +97,6 @@ export async function refreshRepoSkills(): Promise<RefreshSkillsResult> {
   );
   if (error) return { ok: false, error: error.message };
 
-  revalidatePath('/settings/workflows');
   revalidatePath('/skills');
   return { ok: true, count: skills.length };
 }

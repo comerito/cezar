@@ -12,7 +12,7 @@ import {
   ChevronRightIcon,
   MoreVerticalIcon,
 } from '@/components/icons';
-import { refreshRepoSkills } from '../settings/workflows/skills-action';
+import { refreshRepoSkills } from './skills-action';
 
 export interface SkillRow {
   name: string;
