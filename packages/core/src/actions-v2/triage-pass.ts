@@ -19,6 +19,9 @@ export interface TriagePassOptions {
   skills?: Skill[];
   /** Anthropic client override (testing); the runner builds one from env otherwise. */
   anthropic?: Anthropic;
+  /** Forwarded to every `runAction` call in the pass. The same `triggeredBy`
+   *  label is reused for each action so the audit footer reads consistently. */
+  autoComment?: { enabled: boolean; triggeredBy?: string };
 }
 
 /** Per-action result from a triage pass. */
@@ -81,6 +84,7 @@ export async function runTriagePass(opts: TriagePassOptions): Promise<TriagePass
         skills,
         anthropic: opts.anthropic,
         effectCtx,
+        autoComment: opts.autoComment,
       });
       results.push({
         actionName: action.name,

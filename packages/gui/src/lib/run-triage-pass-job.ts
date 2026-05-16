@@ -10,6 +10,8 @@ export interface RunTriagePassJobParams {
   github: GitHubService;
   supabase: SupabaseClient<Database>;
   persister: WorkflowRunPersister;
+  /** Free-form label describing what initiated the pass (e.g. `'on-issue-opened'`). */
+  trigger?: string;
 }
 
 export interface RunTriagePassJobResult {
@@ -39,7 +41,14 @@ export interface RunTriagePassJobResult {
  */
 export async function runTriagePassJob(params: RunTriagePassJobParams): Promise<RunTriagePassJobResult> {
   const core = await import('@cezar/core');
-  const { issueNumber, github, supabase, persister, workspaceId } = params;
+  const { issueNumber, github, supabase, persister, workspaceId, trigger } = params;
+
+  const { data: workspaceRow } = await supabase
+    .from('workspaces')
+    .select('action_auto_comment')
+    .eq('id', workspaceId)
+    .single();
+  const autoCommentEnabled = workspaceRow?.action_auto_comment ?? true;
 
   await persister.recordEvent('lifecycle', { message: `triage-pass: fetching issue #${issueNumber}` });
   const fetched = await github.getIssueWithComments(issueNumber);
@@ -68,6 +77,10 @@ export async function runTriagePassJob(params: RunTriagePassJobParams): Promise<
       supabase,
       github,
       trigger: 'on-issue-opened',
+      autoComment: {
+        enabled: autoCommentEnabled,
+        triggeredBy: `cron · ${trigger ?? 'on-issue-opened'}`,
+      },
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

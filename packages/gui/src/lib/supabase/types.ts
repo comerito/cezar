@@ -64,13 +64,15 @@ export interface Database {
           auto_triage_enabled: boolean;
           autofix_enabled: boolean;
           separate_comment_per_step: boolean;
+          action_auto_comment: boolean;
           auto_triage_action_id: string | null;
           created_at: string;
           updated_at: string;
         };
-        Insert: Omit<Database['public']['Tables']['workspaces']['Row'], 'id' | 'created_at' | 'updated_at' | 'auto_triage_action_id'> & {
+        Insert: Omit<Database['public']['Tables']['workspaces']['Row'], 'id' | 'created_at' | 'updated_at' | 'auto_triage_action_id' | 'action_auto_comment'> & {
           id?: string;
           auto_triage_action_id?: string | null;
+          action_auto_comment?: boolean;
           created_at?: string;
           updated_at?: string;
         };

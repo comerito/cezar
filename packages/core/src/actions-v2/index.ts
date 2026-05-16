@@ -6,6 +6,11 @@ export type { ActionDef, ActionTrigger, ActionRunResult } from './action.js';
 export type { ActionTarget, RunActionDeps } from './runner.js';
 export { runAction } from './runner.js';
 export {
+  buildAutoCommentBody,
+  actionAlreadyCommented,
+  type BuildAutoCommentArgs,
+} from './auto-comment.js';
+export {
   EFFECT_REGISTRY,
   ALL_EFFECT_NAMES,
   executeEffect,

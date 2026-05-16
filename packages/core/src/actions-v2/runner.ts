@@ -1,6 +1,7 @@
 import Anthropic from '@anthropic-ai/sdk';
 import type { ActionDef, ActionRunResult } from './action.js';
 import type { Skill } from '../skills/skill-catalog.js';
+import { actionAlreadyCommented, buildAutoCommentBody } from './auto-comment.js';
 import {
   ALL_EFFECT_NAMES,
   EFFECT_REGISTRY,
@@ -41,6 +42,13 @@ export interface RunActionDeps {
   effectCtx: EffectContext;
   /** Override the model for this run. Defaults to claude-sonnet-4-6. */
   model?: string;
+  /** Auto-comment behaviour. When `enabled`, the runner posts a
+   *  Cezar-branded summary comment after a successful run — unless the
+   *  action itself already posted one via the `comment` effect. */
+  autoComment?: {
+    enabled: boolean;
+    triggeredBy?: string;
+  };
 }
 
 /**
@@ -74,24 +82,53 @@ export async function runAction(
     .join('\n\n---\n\n');
 
   const userMessage = formatTarget(target);
+  const model = deps.model ?? DEFAULT_MODEL;
 
-  if (action.effects && action.effects.length > 0) {
-    return runDeclaredMode(action, target, {
-      client,
-      effectCtx: deps.effectCtx,
-      model: deps.model ?? DEFAULT_MODEL,
-      systemMessage,
-      userMessage,
+  const result = action.effects && action.effects.length > 0
+    ? await runDeclaredMode(action, target, {
+        client,
+        effectCtx: deps.effectCtx,
+        model,
+        systemMessage,
+        userMessage,
+      })
+    : await runToolUseMode(action, target, {
+        client,
+        effectCtx: deps.effectCtx,
+        model,
+        systemMessage,
+        userMessage,
+      });
+
+  if (deps.autoComment?.enabled && !actionAlreadyCommented(result.effectsApplied)) {
+    const body = buildAutoCommentBody({
+      actionName: action.name,
+      text: result.text,
+      effectsApplied: result.effectsApplied,
+      meta: {
+        actionName: action.name,
+        triggeredBy: deps.autoComment.triggeredBy,
+        model,
+        inputTokens: result.usage.inputTokens,
+        outputTokens: result.usage.outputTokens,
+      },
     });
+    try {
+      await deps.effectCtx.github.addComment(deps.effectCtx.targetNumber, body);
+      result.effectsApplied.push({
+        call: { effect: 'comment', args: { body } },
+        summary: `auto-commented on #${deps.effectCtx.targetNumber}`,
+      });
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      result.effectsApplied.push({
+        call: { effect: 'comment', args: { body } },
+        summary: `auto-comment failed: ${message}`,
+      });
+    }
   }
 
-  return runToolUseMode(action, target, {
-    client,
-    effectCtx: deps.effectCtx,
-    model: deps.model ?? DEFAULT_MODEL,
-    systemMessage,
-    userMessage,
-  });
+  return result;
 }
 
 // ─── Declared mode (structured JSON response) ──────────────────────────────

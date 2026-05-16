@@ -13,11 +13,12 @@ async function loadWorkspaceConfig(workspaceId: string): Promise<{
   autoTriageEnabled: boolean;
   autofixEnabled: boolean;
   separateCommentPerStep: boolean;
+  actionAutoComment: boolean;
 }> {
   const supabase = createSupabaseAdminClient();
   const { data } = await supabase
     .from('workspaces')
-    .select('config, issue_autofix_mode, auto_triage_enabled, autofix_enabled, separate_comment_per_step')
+    .select('config, issue_autofix_mode, auto_triage_enabled, autofix_enabled, separate_comment_per_step, action_auto_comment')
     .eq('id', workspaceId)
     .single();
   return {
@@ -26,6 +27,7 @@ async function loadWorkspaceConfig(workspaceId: string): Promise<{
     autoTriageEnabled: data?.auto_triage_enabled ?? true,
     autofixEnabled: data?.autofix_enabled ?? false,
     separateCommentPerStep: data?.separate_comment_per_step ?? false,
+    actionAutoComment: data?.action_auto_comment ?? true,
   };
 }
 
@@ -80,7 +82,7 @@ export default async function SettingsPage() {
     );
   }
 
-  const [{ config, issueAutofixMode, autoTriageEnabled, autofixEnabled, separateCommentPerStep }, members] = await Promise.all([
+  const [{ config, issueAutofixMode, autoTriageEnabled, autofixEnabled, separateCommentPerStep, actionAutoComment }, members] = await Promise.all([
     loadWorkspaceConfig(workspace.id),
     loadMembers(workspace.id),
   ]);
@@ -127,6 +129,7 @@ export default async function SettingsPage() {
             autoTriageEnabled={autoTriageEnabled}
             autofixEnabled={autofixEnabled}
             separateCommentPerStep={separateCommentPerStep}
+            actionAutoComment={actionAutoComment}
             readOnly={!isAdmin}
           />
         </section>

@@ -40,6 +40,13 @@ export async function runActionNow(actionId: string, issueNumber: number): Promi
     .maybeSingle();
   if (!actionRow) return { ok: false, error: 'Action not found' };
 
+  const { data: workspaceRow } = await supabase
+    .from('workspaces')
+    .select('action_auto_comment')
+    .eq('id', workspace.id)
+    .single();
+  const autoCommentEnabled = workspaceRow?.action_auto_comment ?? true;
+
   const { data: issue } = await supabase
     .from('issues')
     .select('number, title, body, state, labels, html_url, comments')
@@ -159,6 +166,7 @@ export async function runActionNow(actionId: string, issueNumber: number): Promi
     const result = await core.runAction(action, target, {
       skills,
       effectCtx: { github, targetNumber: issueNumber, supabase },
+      autoComment: { enabled: autoCommentEnabled, triggeredBy: 'manual · run now' },
     });
     summary = result.text?.slice(0, 500);
     effectsApplied = result.effectsApplied;

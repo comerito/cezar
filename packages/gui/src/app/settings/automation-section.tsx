@@ -7,6 +7,7 @@ interface AutomationSectionProps {
   autoTriageEnabled: boolean;
   autofixEnabled: boolean;
   separateCommentPerStep: boolean;
+  actionAutoComment: boolean;
   readOnly: boolean;
 }
 
@@ -14,6 +15,7 @@ export function AutomationSection({
   autoTriageEnabled,
   autofixEnabled,
   separateCommentPerStep,
+  actionAutoComment,
   readOnly,
 }: AutomationSectionProps) {
   const [state, formAction, pending] = useActionState<SaveAutomationState, FormData>(saveAutomationToggles, {});
@@ -55,6 +57,14 @@ export function AutomationSection({
         label="One comment per workflow step"
         hint="Off (default): a single living comment is edited as the run progresses. On: each step posts its own comment."
         defaultChecked={separateCommentPerStep}
+        readOnly={readOnly}
+      />
+
+      <Toggle
+        name="actionAutoComment"
+        label="Auto-comment on actions"
+        hint="Cezar leaves a short summary comment on the issue or PR after each action runs, explaining what it did and why. Skipped when the action already posted its own comment."
+        defaultChecked={actionAutoComment}
         readOnly={readOnly}
       />
 

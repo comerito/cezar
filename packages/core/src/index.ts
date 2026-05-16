@@ -46,6 +46,7 @@ export {
   formatAuditComment,
   withAuditFooter,
   postAuditComment,
+  type AuditFooterMeta,
 } from './services/audit.js';
 
 // Utils
@@ -117,6 +118,8 @@ export {
   listEnabledActions,
   DEFAULT_ACTIONS,
   runTriagePass,
+  buildAutoCommentBody,
+  actionAlreadyCommented,
   type ActionDef,
   type ActionTrigger,
   type ActionRunResult,
@@ -129,6 +132,7 @@ export {
   type TriagePassOptions,
   type TriagePassActionResult,
   type TriagePassResult,
+  type BuildAutoCommentArgs,
 } from './actions-v2/index.js';
 
 // Workflow bindings (Phase 1a) — the binding model + resolution chain.
