@@ -161,6 +161,37 @@ export interface Database {
         };
         Update: Partial<Database['public']['Tables']['repo_skills']['Insert']>;
       };
+      skill_overrides: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          skill_name: string;
+          body: string;
+          execution_mode: string;
+          triggers: Json;
+          outputs: Json;
+          capabilities: Json;
+          enabled: boolean;
+          created_at: string;
+          updated_at: string;
+          created_by: string | null;
+          updated_by: string | null;
+        };
+        Insert: Omit<Database['public']['Tables']['skill_overrides']['Row'], 'id' | 'body' | 'execution_mode' | 'triggers' | 'outputs' | 'capabilities' | 'enabled' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'> & {
+          id?: string;
+          body?: string;
+          execution_mode?: string;
+          triggers?: Json;
+          outputs?: Json;
+          capabilities?: Json;
+          enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+          created_by?: string | null;
+          updated_by?: string | null;
+        };
+        Update: Partial<Database['public']['Tables']['skill_overrides']['Insert']>;
+      };
       jobs: {
         Row: {
           id: string;

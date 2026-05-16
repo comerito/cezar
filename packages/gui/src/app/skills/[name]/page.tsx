@@ -19,6 +19,21 @@ interface WorkflowBindingDbRow {
   extra_tools: unknown;
 }
 
+interface OverrideRow {
+  body: string;
+  execution_mode: string;
+  triggers: unknown;
+  outputs: unknown;
+  capabilities: unknown;
+  enabled: boolean;
+  updated_at: string | null;
+}
+
+interface IssueRow {
+  number: number;
+  title: string;
+}
+
 interface ParsedSkill {
   name: string;
   description: string | null;
@@ -46,6 +61,11 @@ function parseSkills(raw: unknown): ParsedSkill[] {
     .filter((s): s is ParsedSkill => s !== null);
 }
 
+function parseStringArray(raw: unknown): string[] {
+  if (!Array.isArray(raw)) return [];
+  return raw.filter((s): s is string => typeof s === 'string');
+}
+
 export default async function SkillDetailPage({
   params,
 }: {
@@ -70,7 +90,7 @@ export default async function SkillDetailPage({
   }
 
   const supabase = createSupabaseAdminClient();
-  const [{ data: skillsRow }, { data: bindingRows }] = await Promise.all([
+  const [{ data: skillsRow }, { data: bindingRows }, { data: overrideRow }, { data: issueRows }] = await Promise.all([
     supabase
       .from('repo_skills')
       .select('commit_sha, skills, fetched_at')
@@ -83,23 +103,48 @@ export default async function SkillDetailPage({
       .eq('workspace_id', workspace.id)
       .is('repo', null)
       .returns<WorkflowBindingDbRow[]>(),
+    supabase
+      .from('skill_overrides')
+      .select('body, execution_mode, triggers, outputs, capabilities, enabled, updated_at')
+      .eq('workspace_id', workspace.id)
+      .eq('skill_name', name)
+      .maybeSingle<OverrideRow>(),
+    supabase
+      .from('issues')
+      .select('number, title')
+      .eq('workspace_id', workspace.id)
+      .order('updated_at', { ascending: false })
+      .limit(20)
+      .returns<IssueRow[]>(),
   ]);
 
   const parsed = parseSkills(skillsRow?.skills);
   const skill = parsed.find((s) => s.name === name);
   if (!skill) notFound();
 
+  const upstreamBody = await readSkillBody(workspace.repoOwner, workspace.repoName, skill.path);
+
   const bindings = (bindingRows ?? []).filter((b) => b.skill_name === skill.name);
-  const isOverride = bindings.length > 0;
+  const isOverride = overrideRow !== null;
 
-  const body = await readSkillBody(workspace.repoOwner, workspace.repoName, skill.path);
-
+  // When an override exists, its body/metadata wins. Otherwise we surface the
+  // upstream body and the metadata defaults (which the user can edit and save
+  // to *create* the override).
   const detail: SkillDetail = {
     name: skill.name,
     description: skill.description,
     path: skill.path,
-    body,
+    body: isOverride ? overrideRow!.body : upstreamBody,
+    upstreamBody,
     source: isOverride ? 'override' : 'repo',
+    enabled: isOverride ? overrideRow!.enabled : true,
+    overrideUpdatedAt: isOverride ? overrideRow!.updated_at : null,
+    metadata: {
+      executionMode: isOverride ? overrideRow!.execution_mode : 'continuous',
+      triggers: isOverride ? parseStringArray(overrideRow!.triggers) : ['issue-created'],
+      outputs: isOverride ? parseStringArray(overrideRow!.outputs) : ['stdout.json'],
+      capabilities: isOverride ? parseStringArray(overrideRow!.capabilities) : ['reasoning'],
+    },
     stages: skill.suggestedStages,
     bindings: bindings.map((b) => ({
       stepId: b.step_id,
@@ -111,6 +156,7 @@ export default async function SkillDetailPage({
     })),
     commitSha: skillsRow?.commit_sha ?? null,
     fetchedAt: skillsRow?.fetched_at ?? null,
+    testIssues: (issueRows ?? []).map((i) => ({ number: i.number, title: i.title })),
   };
 
   const isAdmin = workspace.role === 'admin';

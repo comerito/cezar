@@ -1,6 +1,6 @@
 'use client';
 
-import { useState } from 'react';
+import { useCallback, useEffect, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
 import { cn } from '@/components/ui/cn';
 import {
@@ -13,13 +13,29 @@ import {
   CodeIcon,
   ChevronDownIcon,
 } from '@/components/icons';
+import {
+  saveSkillOverride,
+  autosaveSkillOverrideBody,
+  setSkillOverrideEnabled,
+  deleteSkillOverride,
+  type OverridePayload,
+} from './override-actions';
 
 export interface SkillDetail {
   name: string;
   description: string | null;
   path: string;
   body: string | null;
+  upstreamBody: string | null;
   source: 'override' | 'repo' | 'built-in';
+  enabled: boolean;
+  overrideUpdatedAt: string | null;
+  metadata: {
+    executionMode: string;
+    triggers: string[];
+    outputs: string[];
+    capabilities: string[];
+  };
   stages: string[];
   bindings: Array<{
     stepId: string;
@@ -29,6 +45,7 @@ export interface SkillDetail {
   }>;
   commitSha: string | null;
   fetchedAt: string | null;
+  testIssues: Array<{ number: number; title: string }>;
 }
 
 interface Props {
@@ -54,14 +71,166 @@ const CAPABILITIES = [
   { id: 'synthesis', label: 'SYNTHESIS', icon: <CodeIcon className="h-4 w-4" /> },
 ] as const;
 
+const AUTOSAVE_DEBOUNCE_MS = 800;
+
+type SaveState = 'idle' | 'saving' | 'saved' | 'error';
+
 export function SkillDetailView({ skill, readOnly }: Props) {
-  const firstBinding = skill.bindings[0];
-  const [executionMode, setExecutionMode] = useState(firstBinding?.backend ? 'one-shot' : 'continuous');
-  const [triggers, setTriggers] = useState<Set<string>>(() => new Set(['issue-created']));
-  const [outputs, setOutputs] = useState<string[]>(['stdout.json']);
-  const [capabilities, setCapabilities] = useState<Set<string>>(() => new Set(['reasoning']));
+  const [executionMode, setExecutionMode] = useState(skill.metadata.executionMode);
+  const [triggers, setTriggers] = useState<Set<string>>(() => new Set(skill.metadata.triggers));
+  const [outputs, setOutputs] = useState<string[]>(skill.metadata.outputs);
+  const [newOutput, setNewOutput] = useState('');
+  const [capabilities, setCapabilities] = useState<Set<string>>(() => new Set(skill.metadata.capabilities));
   const [body, setBody] = useState(skill.body ?? '');
-  const [dirty, setDirty] = useState(false);
+  const [bodyDirty, setBodyDirty] = useState(false);
+  const [metaDirty, setMetaDirty] = useState(false);
+  const [saveState, setSaveState] = useState<SaveState>('idle');
+  const [saveError, setSaveError] = useState<string | null>(null);
+  const [enabled, setEnabled] = useState(skill.enabled);
+  const [overrideUpdatedAt, setOverrideUpdatedAt] = useState<string | null>(skill.overrideUpdatedAt);
+  const [hasOverride, setHasOverride] = useState(skill.source === 'override');
+  const [, startTransition] = useTransition();
+
+  // Simulation pane state.
+  const [selectedIssue, setSelectedIssue] = useState<number | null>(
+    skill.testIssues.length > 0 ? skill.testIssues[0].number : null,
+  );
+  const [simRunning, setSimRunning] = useState(false);
+  const [simOutput, setSimOutput] = useState<string>('');
+
+  // Reset when navigating between skills (server-rendered name/body changes).
+  useEffect(() => {
+    setExecutionMode(skill.metadata.executionMode);
+    setTriggers(new Set(skill.metadata.triggers));
+    setOutputs(skill.metadata.outputs);
+    setCapabilities(new Set(skill.metadata.capabilities));
+    setBody(skill.body ?? '');
+    setBodyDirty(false);
+    setMetaDirty(false);
+    setSaveState('idle');
+    setSaveError(null);
+    setEnabled(skill.enabled);
+    setOverrideUpdatedAt(skill.overrideUpdatedAt);
+    setHasOverride(skill.source === 'override');
+  }, [
+    skill.name,
+    skill.body,
+    skill.enabled,
+    skill.overrideUpdatedAt,
+    skill.source,
+    skill.metadata.executionMode,
+    skill.metadata.triggers,
+    skill.metadata.outputs,
+    skill.metadata.capabilities,
+  ]);
+
+  // Debounced body autosave.
+  const bodyTimerRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  useEffect(() => {
+    if (!bodyDirty || readOnly) return;
+    if (bodyTimerRef.current) clearTimeout(bodyTimerRef.current);
+    bodyTimerRef.current = setTimeout(async () => {
+      setSaveState('saving');
+      const result = await autosaveSkillOverrideBody(skill.name, body);
+      if (result.ok) {
+        setSaveState('saved');
+        setSaveError(null);
+        setBodyDirty(false);
+        setHasOverride(true);
+        if (result.updatedAt) setOverrideUpdatedAt(result.updatedAt);
+        if (typeof result.enabled === 'boolean') setEnabled(result.enabled);
+      } else {
+        setSaveState('error');
+        setSaveError(result.error ?? 'Save failed');
+      }
+    }, AUTOSAVE_DEBOUNCE_MS);
+    return () => {
+      if (bodyTimerRef.current) clearTimeout(bodyTimerRef.current);
+    };
+  }, [body, bodyDirty, readOnly, skill.name]);
+
+  const buildPayload = useCallback(
+    (): OverridePayload => ({
+      executionMode,
+      triggers: Array.from(triggers),
+      outputs,
+      capabilities: Array.from(capabilities),
+      body,
+    }),
+    [executionMode, triggers, outputs, capabilities, body],
+  );
+
+  async function handleSave(enable: boolean) {
+    if (readOnly) return;
+    setSaveState('saving');
+    const result = await saveSkillOverride(skill.name, buildPayload(), { enable });
+    if (result.ok) {
+      setSaveState('saved');
+      setSaveError(null);
+      setBodyDirty(false);
+      setMetaDirty(false);
+      setHasOverride(true);
+      if (typeof result.enabled === 'boolean') setEnabled(result.enabled);
+      if (result.updatedAt) setOverrideUpdatedAt(result.updatedAt);
+    } else {
+      setSaveState('error');
+      setSaveError(result.error ?? 'Save failed');
+    }
+  }
+
+  async function handleDiscard() {
+    if (readOnly) return;
+    // If we have an override, "Discard" should revert to upstream entirely.
+    if (hasOverride) {
+      const ok = window.confirm(
+        'Delete the override for this skill? The upstream version from the repo will be used again.',
+      );
+      if (!ok) return;
+      setSaveState('saving');
+      const result = await deleteSkillOverride(skill.name);
+      if (result.ok) {
+        setBody(skill.upstreamBody ?? '');
+        setExecutionMode('continuous');
+        setTriggers(new Set(['issue-created']));
+        setOutputs(['stdout.json']);
+        setCapabilities(new Set(['reasoning']));
+        setHasOverride(false);
+        setEnabled(true);
+        setOverrideUpdatedAt(null);
+        setBodyDirty(false);
+        setMetaDirty(false);
+        setSaveState('saved');
+        setSaveError(null);
+      } else {
+        setSaveState('error');
+        setSaveError(result.error ?? 'Could not delete override');
+      }
+      return;
+    }
+    // No override yet — just reset the form.
+    setBody(skill.body ?? '');
+    setExecutionMode(skill.metadata.executionMode);
+    setTriggers(new Set(skill.metadata.triggers));
+    setOutputs(skill.metadata.outputs);
+    setCapabilities(new Set(skill.metadata.capabilities));
+    setBodyDirty(false);
+    setMetaDirty(false);
+  }
+
+  async function handleToggleEnabled() {
+    if (readOnly || !hasOverride) return;
+    setSaveState('saving');
+    startTransition(async () => {
+      const result = await setSkillOverrideEnabled(skill.name, !enabled);
+      if (result.ok) {
+        setEnabled(result.enabled ?? !enabled);
+        setSaveState('saved');
+      } else {
+        setSaveState('error');
+        setSaveError(result.error ?? 'Toggle failed');
+      }
+    });
+  }
 
   function toggleTrigger(id: string) {
     setTriggers((prev) => {
@@ -70,7 +239,7 @@ export function SkillDetailView({ skill, readOnly }: Props) {
       else next.add(id);
       return next;
     });
-    setDirty(true);
+    setMetaDirty(true);
   }
 
   function toggleCapability(id: string) {
@@ -80,21 +249,63 @@ export function SkillDetailView({ skill, readOnly }: Props) {
       else next.add(id);
       return next;
     });
-    setDirty(true);
+    setMetaDirty(true);
   }
 
   function removeOutput(name: string) {
     setOutputs((prev) => prev.filter((o) => o !== name));
-    setDirty(true);
+    setMetaDirty(true);
   }
 
-  function discard() {
-    setBody(skill.body ?? '');
-    setTriggers(new Set(['issue-created']));
-    setOutputs(['stdout.json']);
-    setCapabilities(new Set(['reasoning']));
-    setDirty(false);
+  function addOutput() {
+    const v = newOutput.trim();
+    if (!v) return;
+    if (outputs.includes(v)) {
+      setNewOutput('');
+      return;
+    }
+    setOutputs((prev) => [...prev, v]);
+    setNewOutput('');
+    setMetaDirty(true);
   }
+
+  async function runSimulation() {
+    if (selectedIssue === null) return;
+    setSimRunning(true);
+    setSimOutput('');
+    try {
+      const resp = await fetch(`/api/skills/${encodeURIComponent(skill.name)}/simulate`, {
+        method: 'POST',
+        headers: { 'content-type': 'application/json' },
+        body: JSON.stringify({ issueNumber: selectedIssue, body }),
+      });
+      if (!resp.ok || !resp.body) {
+        const text = await resp.text().catch(() => '');
+        setSimOutput(`Error: ${resp.status} ${text || resp.statusText}`);
+        setSimRunning(false);
+        return;
+      }
+      const reader = resp.body.getReader();
+      const decoder = new TextDecoder();
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        const chunk = decoder.decode(value, { stream: true });
+        setSimOutput((prev) => prev + chunk);
+      }
+    } catch (err) {
+      setSimOutput((prev) => prev + `\nError: ${err instanceof Error ? err.message : String(err)}`);
+    } finally {
+      setSimRunning(false);
+    }
+  }
+
+  const dirty = bodyDirty || metaDirty;
+  const headerBadge: { label: string; tone: 'tertiary' | 'primary' | 'muted' } = hasOverride
+    ? enabled
+      ? { label: 'OVERRIDE · ACTIVE', tone: 'primary' }
+      : { label: 'OVERRIDE · DISABLED', tone: 'muted' }
+    : { label: 'AI_ASSISTED', tone: 'tertiary' };
 
   return (
     <div className="flex min-h-[calc(100vh-56px)] flex-col">
@@ -114,9 +325,24 @@ export function SkillDetailView({ skill, readOnly }: Props) {
             <span className="text-on-surface">{skill.path || '(no path)'}</span>
           </div>
         </div>
-        <span className="inline-flex items-center rounded-md border border-tertiary-container/60 bg-tertiary-container/30 px-2.5 py-1 font-display text-[11px] font-semibold uppercase tracking-[0.05em] text-tertiary">
-          AI_ASSISTED
-        </span>
+        <div className="flex items-center gap-2">
+          {hasOverride && !readOnly && (
+            <button
+              type="button"
+              onClick={handleToggleEnabled}
+              className={cn(
+                'inline-flex items-center gap-2 rounded-md border px-3 py-1.5 text-xs transition-colors',
+                enabled
+                  ? 'border-outline-variant bg-surface text-on-surface hover:border-primary'
+                  : 'border-tertiary/40 bg-tertiary-container/20 text-tertiary hover:border-tertiary',
+              )}
+              title={enabled ? 'Disable override (fall back to upstream)' : 'Enable override'}
+            >
+              {enabled ? 'Disable override' : 'Enable override'}
+            </button>
+          )}
+          <Badge tone={headerBadge.tone}>{headerBadge.label}</Badge>
+        </div>
       </header>
 
       {/* Two-column body */}
@@ -134,7 +360,7 @@ export function SkillDetailView({ skill, readOnly }: Props) {
               value={executionMode}
               onChange={(v) => {
                 setExecutionMode(v);
-                setDirty(true);
+                setMetaDirty(true);
               }}
               disabled={readOnly}
               options={EXECUTION_MODES}
@@ -188,14 +414,32 @@ export function SkillDetailView({ skill, readOnly }: Props) {
                   )}
                 </div>
               ))}
-              <button
-                type="button"
-                disabled={readOnly}
-                className="inline-flex items-center gap-2 rounded-md border border-dashed border-outline-variant bg-transparent px-3 py-2 text-sm text-on-surface-variant transition-colors hover:border-primary hover:text-on-surface disabled:cursor-not-allowed disabled:opacity-50"
-              >
-                <PlusIcon className="h-4 w-4" />
-                Add destination
-              </button>
+              {!readOnly && (
+                <div className="flex items-center gap-2">
+                  <input
+                    type="text"
+                    value={newOutput}
+                    onChange={(e) => setNewOutput(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === 'Enter') {
+                        e.preventDefault();
+                        addOutput();
+                      }
+                    }}
+                    placeholder="stdout.json, slack:#bugs, …"
+                    className="h-9 flex-1 rounded-md border border-dashed border-outline-variant bg-surface px-3 text-sm text-on-surface placeholder:text-on-surface-variant focus:border-primary focus:outline-none"
+                  />
+                  <button
+                    type="button"
+                    onClick={addOutput}
+                    disabled={!newOutput.trim()}
+                    className="inline-flex h-9 items-center gap-1 rounded-md border border-outline-variant bg-surface px-2 text-sm text-on-surface-variant transition-colors hover:border-primary hover:text-on-surface disabled:cursor-not-allowed disabled:opacity-50"
+                  >
+                    <PlusIcon className="h-4 w-4" />
+                    Add
+                  </button>
+                </div>
+              )}
             </div>
           </Field>
 
@@ -249,6 +493,12 @@ export function SkillDetailView({ skill, readOnly }: Props) {
               </div>
             </div>
           )}
+
+          {overrideUpdatedAt && (
+            <p className="mt-6 text-xs text-on-surface-variant">
+              Override last saved {new Date(overrideUpdatedAt).toLocaleString()}.
+            </p>
+          )}
         </aside>
 
         {/* RIGHT: Instruction workspace */}
@@ -257,16 +507,7 @@ export function SkillDetailView({ skill, readOnly }: Props) {
             <span className="font-display text-[11px] font-semibold uppercase tracking-[0.05em] text-on-surface-variant">
               Instruction Workspace (MD)
             </span>
-            <span
-              className={cn(
-                'inline-flex items-center rounded-md border px-2 py-0.5 font-display text-[10px] font-semibold uppercase tracking-[0.05em]',
-                dirty
-                  ? 'border-tertiary/40 bg-tertiary-container/20 text-tertiary'
-                  : 'border-outline-variant bg-surface-container text-on-surface-variant',
-              )}
-            >
-              {dirty ? 'Unsaved' : 'Auto-saved'}
-            </span>
+            <AutosaveBadge state={saveState} dirty={bodyDirty} error={saveError} />
           </div>
           <div className="flex-1 overflow-hidden bg-surface-container-lowest p-0">
             {skill.body === null ? (
@@ -286,7 +527,8 @@ export function SkillDetailView({ skill, readOnly }: Props) {
                 value={body}
                 onChange={(e) => {
                   setBody(e.target.value);
-                  setDirty(true);
+                  setBodyDirty(true);
+                  setSaveState('idle');
                 }}
                 readOnly={readOnly}
                 spellCheck={false}
@@ -304,16 +546,20 @@ export function SkillDetailView({ skill, readOnly }: Props) {
             <span className="font-display text-[11px] font-semibold uppercase tracking-[0.05em] text-on-surface-variant">
               Dry Run Preview
             </span>
-            <SelectButton placeholder="Select Test Issue" />
+            <IssueSelect
+              issues={skill.testIssues}
+              value={selectedIssue}
+              onChange={setSelectedIssue}
+            />
           </div>
           <button
             type="button"
-            disabled
-            className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-primary-on opacity-60"
-            title="Dry-run runner is not implemented yet"
+            onClick={runSimulation}
+            disabled={simRunning || selectedIssue === null}
+            className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-primary-on transition-colors hover:bg-primary-container hover:text-on-surface disabled:cursor-not-allowed disabled:opacity-50"
           >
             <PlayIcon className="h-4 w-4" />
-            Run Simulation
+            {simRunning ? 'Running…' : 'Run Simulation'}
           </button>
         </div>
         <div className="grid gap-0 md:grid-cols-2">
@@ -321,16 +567,16 @@ export function SkillDetailView({ skill, readOnly }: Props) {
             <div className="mb-2 font-display text-[11px] font-semibold uppercase tracking-[0.05em] text-on-surface-variant">
               Resolved System Prompt
             </div>
-            <pre className="whitespace-pre-wrap font-mono text-[12px] leading-[18px] text-on-surface-variant">
-              {`"You are an AI assistant specialized in developer workflows.\nAnalyzing issue #1024 context... Apply ${skill.name} logic...\nEnvironment: production-cluster-a..."`}
+            <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-[18px] text-on-surface-variant">
+              {body || '(empty)'}
             </pre>
           </div>
           <div className="px-6 py-4">
             <div className="mb-2 font-display text-[11px] font-semibold uppercase tracking-[0.05em] text-on-surface-variant">
               Simulation Output
             </div>
-            <pre className="whitespace-pre-wrap font-mono text-[12px] leading-[18px] text-on-surface-variant">
-              <span className="text-primary">[--:--:--]</span> <span className="text-tertiary">INFO</span>: Run simulation to view output.
+            <pre className="max-h-[200px] overflow-auto whitespace-pre-wrap font-mono text-[12px] leading-[18px] text-on-surface-variant">
+              {simOutput || (simRunning ? 'Streaming…' : `Select a test issue and click Run Simulation.`)}
             </pre>
           </div>
         </div>
@@ -340,27 +586,28 @@ export function SkillDetailView({ skill, readOnly }: Props) {
       <footer className="sticky bottom-0 flex flex-wrap items-center justify-between gap-3 border-t border-outline-variant bg-surface-container-low px-6 py-3">
         <button
           type="button"
-          onClick={discard}
-          disabled={!dirty || readOnly}
+          onClick={handleDiscard}
+          disabled={readOnly || (!dirty && !hasOverride)}
           className="inline-flex h-9 items-center gap-2 rounded-md border border-outline-variant bg-surface px-3 text-sm text-on-surface-variant transition-colors hover:border-primary hover:text-on-surface disabled:cursor-not-allowed disabled:opacity-50"
         >
-          Discard Changes
+          {hasOverride ? 'Revert to upstream' : 'Discard changes'}
         </button>
         <div className="flex items-center gap-2">
+          {saveError && <span className="text-xs text-error">{saveError}</span>}
           <button
             type="button"
-            disabled={readOnly}
+            onClick={() => handleSave(false)}
+            disabled={readOnly || saveState === 'saving'}
             className="inline-flex h-9 items-center gap-2 rounded-md border border-outline-variant bg-surface px-3 text-sm font-medium text-on-surface transition-colors hover:border-primary disabled:cursor-not-allowed disabled:opacity-50"
-            title="Save-as-override is wired in a follow-up"
           >
             <RotateLeftIcon className="h-4 w-4" />
             Save as override
           </button>
           <button
             type="button"
-            disabled={readOnly}
+            onClick={() => handleSave(true)}
+            disabled={readOnly || saveState === 'saving'}
             className="inline-flex h-9 items-center gap-2 rounded-md bg-primary px-3 text-sm font-semibold text-primary-on transition-colors hover:bg-primary-container hover:text-on-surface disabled:cursor-not-allowed disabled:opacity-50"
-            title="Save & enable is wired in a follow-up"
           >
             <CheckIcon className="h-4 w-4" />
             Save &amp; Enable Skill
@@ -368,6 +615,41 @@ export function SkillDetailView({ skill, readOnly }: Props) {
         </div>
       </footer>
     </div>
+  );
+}
+
+function AutosaveBadge({ state, dirty, error }: { state: SaveState; dirty: boolean; error: string | null }) {
+  if (state === 'error') return <Badge tone="error">{error ?? 'Save failed'}</Badge>;
+  if (state === 'saving') return <Badge tone="muted">Saving…</Badge>;
+  if (dirty) return <Badge tone="tertiary">Unsaved</Badge>;
+  if (state === 'saved') return <Badge tone="primary">Saved</Badge>;
+  return <Badge tone="muted">Auto-saved</Badge>;
+}
+
+function Badge({
+  children,
+  tone,
+}: {
+  children: React.ReactNode;
+  tone: 'tertiary' | 'primary' | 'muted' | 'error';
+}) {
+  const cls =
+    tone === 'tertiary'
+      ? 'border-tertiary-container/60 bg-tertiary-container/30 text-tertiary'
+      : tone === 'primary'
+        ? 'border-primary/40 bg-primary-container/20 text-primary'
+        : tone === 'error'
+          ? 'border-error/40 bg-error-container/30 text-error'
+          : 'border-outline-variant bg-surface-container text-on-surface-variant';
+  return (
+    <span
+      className={cn(
+        'inline-flex items-center rounded-md border px-2.5 py-1 font-display text-[11px] font-semibold uppercase tracking-[0.05em]',
+        cls,
+      )}
+    >
+      {children}
+    </span>
   );
 }
 
@@ -428,15 +710,36 @@ function Select({
   );
 }
 
-function SelectButton({ placeholder }: { placeholder: string }) {
+function IssueSelect({
+  issues,
+  value,
+  onChange,
+}: {
+  issues: Array<{ number: number; title: string }>;
+  value: number | null;
+  onChange: (n: number | null) => void;
+}) {
+  if (issues.length === 0) {
+    return (
+      <span className="inline-flex h-9 items-center rounded-md border border-outline-variant bg-surface px-3 text-sm text-on-surface-variant">
+        No issues to test against
+      </span>
+    );
+  }
   return (
-    <button
-      type="button"
-      disabled
-      className="inline-flex h-9 items-center gap-2 rounded-md border border-outline-variant bg-surface px-3 text-sm text-on-surface-variant opacity-80"
-    >
-      <span>{placeholder}</span>
-      <ChevronDownIcon className="h-4 w-4" />
-    </button>
+    <div className="relative">
+      <select
+        value={value === null ? '' : String(value)}
+        onChange={(e) => onChange(e.target.value === '' ? null : Number(e.target.value))}
+        className="h-9 appearance-none rounded-md border border-outline-variant bg-surface pl-3 pr-9 text-sm text-on-surface focus:border-primary focus:outline-none"
+      >
+        {issues.map((i) => (
+          <option key={i.number} value={i.number}>
+            #{i.number} — {i.title.length > 60 ? i.title.slice(0, 60) + '…' : i.title}
+          </option>
+        ))}
+      </select>
+      <ChevronDownIcon className="pointer-events-none absolute right-2 top-1/2 h-4 w-4 -translate-y-1/2 text-on-surface-variant" />
+    </div>
   );
 }

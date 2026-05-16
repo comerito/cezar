@@ -8,9 +8,11 @@ interface RepoSkillsRow {
   fetched_at: string | null;
 }
 
-interface WorkflowBindingDbRow {
-  step_id: string;
-  skill_name: string | null;
+interface OverrideRow {
+  skill_name: string;
+  enabled: boolean;
+  execution_mode: string;
+  updated_at: string | null;
 }
 
 interface ParsedSkill {
@@ -41,29 +43,16 @@ function parseSkills(raw: unknown): ParsedSkill[] {
 }
 
 function inferTrigger(stages: string[]): SkillRow['trigger'] {
-  // Triage-ish stages typically fire on every sync; autofix-ish stages fire on demand.
   const triageish = new Set([
-    'bug-detector',
-    'priority',
-    'categorize',
-    'security',
-    'quality',
-    'good-first-issue',
-    'missing-info',
-    'claim-detector',
-    'contributor-welcome',
-    'recurring-questions',
-    'duplicates',
-    'stale',
-    'done-detector',
-    'auto-label',
+    'bug-detector', 'priority', 'categorize', 'security', 'quality',
+    'good-first-issue', 'missing-info', 'claim-detector',
+    'contributor-welcome', 'recurring-questions', 'duplicates',
+    'stale', 'done-detector', 'auto-label',
   ]);
   return stages.some((s) => triageish.has(s)) ? 'on-sync' : 'cron';
 }
 
 function inferMode(stages: string[]): SkillRow['mode'] {
-  // Skills that suggest themselves for autofix loop stages are "framed" (multi-step),
-  // everything else is "inline".
   const framedish = new Set(['verify-in-repo', 'root-cause', 'fix', 'review', 'review-loop']);
   return stages.some((s) => framedish.has(s)) ? 'framed' : 'inline';
 }
@@ -83,7 +72,7 @@ export default async function SkillsPage() {
   }
 
   const supabase = createSupabaseAdminClient();
-  const [{ data: skillsRow }, { data: bindingRows }] = await Promise.all([
+  const [{ data: skillsRow }, { data: overrideRows }] = await Promise.all([
     supabase
       .from('repo_skills')
       .select('commit_sha, skills, fetched_at')
@@ -91,38 +80,40 @@ export default async function SkillsPage() {
       .eq('repo', workspace.repoName)
       .maybeSingle<RepoSkillsRow>(),
     supabase
-      .from('workflow_bindings')
-      .select('step_id, skill_name')
+      .from('skill_overrides')
+      .select('skill_name, enabled, execution_mode, updated_at')
       .eq('workspace_id', workspace.id)
-      .is('repo', null)
-      .returns<WorkflowBindingDbRow[]>(),
+      .returns<OverrideRow[]>(),
   ]);
 
   const parsed = parseSkills(skillsRow?.skills);
-  const overrideNames = new Set(
-    (bindingRows ?? [])
-      .map((b) => b.skill_name)
-      .filter((n): n is string => typeof n === 'string' && n.length > 0),
+  const overrideByName = new Map<string, OverrideRow>(
+    (overrideRows ?? []).map((o) => [o.skill_name, o]),
   );
 
-  const rows: SkillRow[] = parsed.map((s) => ({
-    name: s.name,
-    description: s.description,
-    path: s.path,
-    source: overrideNames.has(s.name) ? 'override' : 'repo',
-    mode: inferMode(s.suggestedStages),
-    trigger: inferTrigger(s.suggestedStages),
-    status: 'enabled',
-    lastRunIso: null,
-    stages: s.suggestedStages,
-  }));
+  const rows: SkillRow[] = parsed.map((s) => {
+    const override = overrideByName.get(s.name);
+    const isOverridden = override !== undefined;
+    const enabled = isOverridden ? override.enabled : true;
+    return {
+      name: s.name,
+      description: s.description,
+      path: s.path,
+      source: isOverridden ? 'override' : 'repo',
+      mode: inferMode(s.suggestedStages),
+      trigger: inferTrigger(s.suggestedStages),
+      status: enabled ? 'enabled' : 'disabled',
+      lastRunIso: isOverridden ? override.updated_at ?? null : null,
+      stages: s.suggestedStages,
+    };
+  });
 
   const isAdmin = workspace.role === 'admin';
 
   return (
     <SkillsView
       rows={rows}
-      overridesCount={overrideNames.size}
+      overridesCount={overrideByName.size}
       commitSha={skillsRow?.commit_sha ?? null}
       fetchedAt={skillsRow?.fetched_at ?? null}
       readOnly={!isAdmin}

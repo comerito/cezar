@@ -34,7 +34,14 @@ export default async function RootLayout({ children }: { children: React.ReactNo
         <div className="flex min-h-screen">
           <Sidebar user={user} workspace={workspace} workspaces={workspaces} />
           <div className="flex min-h-screen flex-1 flex-col overflow-x-hidden">
-            <TopBar user={user} />
+            <TopBar
+              user={{
+                id: user.id,
+                email: user.email,
+                name: user.name,
+                avatarUrl: user.avatarUrl,
+              }}
+            />
             <main className="flex-1">{children}</main>
           </div>
         </div>
