@@ -73,11 +73,16 @@ export async function refreshRepoSkills(): Promise<RefreshSkillsResult> {
   }
 
   const skills = await core.discoverSkills(repoRoot, skillsDir);
+  // discoverSkills now returns the merged catalog (built-in shipped with
+  // Cezar + repo skills under .ai/skills). We cache both so the GUI doesn't
+  // need to re-discover built-ins on every render — the source field tells
+  // the UI which chip to show.
   const metadata = skills.map((s) => ({
     name: s.name,
     description: s.description ?? null,
     suggestedStages: s.suggestedStages,
     path: s.path,
+    source: s.source,
   }));
 
   const { error } = await supabase.from('repo_skills').upsert(

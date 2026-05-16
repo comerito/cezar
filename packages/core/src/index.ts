@@ -133,12 +133,33 @@ export * from './actions/autofix/prompts/fixer.js';
 export * from './actions/autofix/prompts/reviewer.js';
 export * from './actions/autofix/ci-attribution.js';
 
-// Skills (Phase 1a) — repo-discovered `.ai/skills/**/*.md` catalog.
+// Skills (Phase 1a) — merged built-in + repo `.ai/skills/**/*.md` catalog.
 export {
   discoverSkills,
+  discoverBuiltinSkills,
   skillsForStage,
   type Skill,
 } from './skills/skill-catalog.js';
+
+// Data-driven actions runtime — system prompt + skill_refs + effects/tools.
+// Lands alongside the legacy actions/* plugin tree; the cutover happens in
+// the next commit (seed defaults + workflow engine reroute + legacy delete).
+export {
+  runAction,
+  EFFECT_REGISTRY,
+  ALL_EFFECT_NAMES,
+  executeEffect,
+  effectsAsAnthropicTools,
+  type ActionDef,
+  type ActionTrigger,
+  type ActionRunResult,
+  type ActionTarget,
+  type RunActionDeps,
+  type EffectDef,
+  type EffectCall,
+  type EffectContext,
+  type EffectName,
+} from './actions-v2/index.js';
 
 // Workflow bindings (Phase 1a) — the binding model + resolution chain.
 export {

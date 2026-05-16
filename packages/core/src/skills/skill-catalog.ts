@@ -1,12 +1,14 @@
 import { readdir, readFile } from 'node:fs/promises';
-import { join, resolve, basename, extname } from 'node:path';
+import { join, resolve, basename, extname, dirname } from 'node:path';
+import { fileURLToPath } from 'node:url';
 
 /**
- * A repo-discovered skill: a Markdown file under `<repoRoot>/<skillsDir>/`.
- * `body` is the file content with any leading `---` frontmatter block stripped;
- * `suggestedStages` comes from a `cezar-stages` frontmatter array (empty if the
- * file has no frontmatter or no such key). A skill never changes behavior on its
- * own — the GUI/CLI binding must reference it by `name`.
+ * A discovered skill. `source` records provenance:
+ *   - 'built-in' — shipped with Cezar (packages/core/skills/*.md)
+ *   - 'repo'     — discovered from the workspace's <repo>/.ai/skills/
+ *
+ * Overrides (workspace-scoped DB copies) are layered on top of either source
+ * at consumer side; the catalog itself only enumerates origins.
  */
 export interface Skill {
   name: string;
@@ -14,33 +16,46 @@ export interface Skill {
   body: string;
   path: string;
   suggestedStages: string[];
+  source: 'built-in' | 'repo';
 }
 
 /**
- * Recursively discover `**\/*.md` skills under `<repoRoot>/<skillsDir>`.
- * Missing/empty directory ⇒ `[]` (an absent `.ai/skills/` is fully supported).
- * Results are sorted by `name`. No glob dependency — uses `readdir(recursive)`.
+ * Resolves the on-disk directory for Cezar's built-in skill catalog. The
+ * directory ships alongside the package (`packages/core/skills/`), so we
+ * walk up from this file's URL — same result whether we're running from
+ * `src/` under tsx or from `dist/` after a build.
  */
-export async function discoverSkills(repoRoot: string, skillsDir = '.ai/skills'): Promise<Skill[]> {
-  const root = resolve(repoRoot, skillsDir);
+function builtinSkillsDir(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  // here = <core>/dist/skills (built) or <core>/src/skills (dev). Either way,
+  // the built-in catalog lives at <core>/skills.
+  return resolve(here, '..', '..', 'skills');
+}
 
+/**
+ * Recursively discover `**\/*.md` skills under a directory. Missing /
+ * unreadable directory ⇒ `[]`. Used internally by `discoverSkills`.
+ */
+async function readMarkdownSkills(
+  dir: string,
+  source: Skill['source'],
+): Promise<Skill[]> {
   let entries: string[];
   try {
-    entries = await readdir(root, { recursive: true });
+    entries = await readdir(dir, { recursive: true });
   } catch {
-    // ENOENT (or any read failure) on the skills dir ⇒ no skills.
     return [];
   }
 
   const mdFiles = entries.filter((rel) => extname(rel).toLowerCase() === '.md');
   const skills: Skill[] = [];
   for (const rel of mdFiles) {
-    const absPath = join(root, rel);
+    const absPath = join(dir, rel);
     let raw: string;
     try {
       raw = await readFile(absPath, 'utf8');
     } catch {
-      continue; // a directory matched by extname check, or vanished — skip it
+      continue;
     }
     const { frontmatter, body } = parseFrontmatter(raw);
     const name = typeof frontmatter.name === 'string' && frontmatter.name.trim()
@@ -52,9 +67,41 @@ export async function discoverSkills(repoRoot: string, skillsDir = '.ai/skills')
     const suggestedStages = Array.isArray(frontmatter['cezar-stages'])
       ? frontmatter['cezar-stages'].filter((s): s is string => typeof s === 'string')
       : [];
-    skills.push({ name, description, body, path: absPath, suggestedStages });
+    skills.push({ name, description, body, path: absPath, suggestedStages, source });
   }
+  return skills;
+}
 
+/**
+ * Discover the merged skill catalog for a workspace: built-in skills shipped
+ * with Cezar plus any `**\/*.md` files in `<repoRoot>/<skillsDir>`. Repo
+ * skills take precedence when names collide.
+ *
+ * Empty repo skills dir is fully supported — every action falls back to the
+ * built-in catalog.
+ */
+export async function discoverSkills(
+  repoRoot: string,
+  skillsDir = '.ai/skills',
+): Promise<Skill[]> {
+  const [builtin, repo] = await Promise.all([
+    readMarkdownSkills(builtinSkillsDir(), 'built-in'),
+    readMarkdownSkills(resolve(repoRoot, skillsDir), 'repo'),
+  ]);
+
+  // Repo skills win on name collisions; built-in fills the gaps.
+  const repoNames = new Set(repo.map((s) => s.name));
+  const merged = [...repo, ...builtin.filter((s) => !repoNames.has(s.name))];
+  merged.sort((a, b) => a.name.localeCompare(b.name));
+  return merged;
+}
+
+/**
+ * Discover ONLY the built-in catalog. Useful for seeding actions on initial
+ * workspace creation, before any repo has been cloned.
+ */
+export async function discoverBuiltinSkills(): Promise<Skill[]> {
+  const skills = await readMarkdownSkills(builtinSkillsDir(), 'built-in');
   skills.sort((a, b) => a.name.localeCompare(b.name));
   return skills;
 }
@@ -78,7 +125,6 @@ type FrontmatterValue = string | string[];
  * multi-line scalars) so we avoid a `js-yaml`/`gray-matter` dependency.
  */
 function parseFrontmatter(raw: string): { frontmatter: Record<string, FrontmatterValue>; body: string } {
-  // Normalize CRLF so the delimiter regex is simple.
   const text = raw.replace(/\r\n/g, '\n');
   if (!text.startsWith('---\n')) return { frontmatter: {}, body: raw };
 
@@ -86,7 +132,6 @@ function parseFrontmatter(raw: string): { frontmatter: Record<string, Frontmatte
   if (end === -1) return { frontmatter: {}, body: raw };
 
   const block = text.slice(4, end);
-  // Body starts after the closing `---` line (and its trailing newline if any).
   const afterDelimiter = text.indexOf('\n', end + 1);
   const body = afterDelimiter === -1 ? '' : text.slice(afterDelimiter + 1);
 
@@ -101,7 +146,6 @@ function parseFrontmatter(raw: string): { frontmatter: Record<string, Frontmatte
     const rest = m[2].trim();
 
     if (rest === '') {
-      // Possible block array: subsequent `  - item` lines.
       const items: string[] = [];
       while (i + 1 < lines.length && /^\s*-\s+/.test(lines[i + 1])) {
         items.push(stripQuotes(lines[i + 1].replace(/^\s*-\s+/, '').trim()));

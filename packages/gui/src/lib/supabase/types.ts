@@ -64,11 +64,13 @@ export interface Database {
           auto_triage_enabled: boolean;
           autofix_enabled: boolean;
           separate_comment_per_step: boolean;
+          auto_triage_action_id: string | null;
           created_at: string;
           updated_at: string;
         };
-        Insert: Omit<Database['public']['Tables']['workspaces']['Row'], 'id' | 'created_at' | 'updated_at'> & {
+        Insert: Omit<Database['public']['Tables']['workspaces']['Row'], 'id' | 'created_at' | 'updated_at' | 'auto_triage_action_id'> & {
           id?: string;
+          auto_triage_action_id?: string | null;
           created_at?: string;
           updated_at?: string;
         };
@@ -160,6 +162,46 @@ export interface Database {
           fetched_at?: string;
         };
         Update: Partial<Database['public']['Tables']['repo_skills']['Insert']>;
+      };
+      actions: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          name: string;
+          kind: 'built-in' | 'user';
+          description: string | null;
+          system_prompt: string;
+          skill_refs: Json;
+          target: 'issue' | 'pr';
+          triggers: Json;
+          effects: Json | null;
+          output_schema: Json | null;
+          enabled: boolean;
+          created_at: string;
+          updated_at: string;
+          created_by: string | null;
+          updated_by: string | null;
+        };
+        Insert: Omit<Database['public']['Tables']['actions']['Row'],
+          'id' | 'kind' | 'description' | 'system_prompt' | 'skill_refs' | 'triggers' |
+          'effects' | 'output_schema' | 'enabled' | 'created_at' | 'updated_at' |
+          'created_by' | 'updated_by'
+        > & {
+          id?: string;
+          kind?: 'built-in' | 'user';
+          description?: string | null;
+          system_prompt?: string;
+          skill_refs?: Json;
+          triggers?: Json;
+          effects?: Json | null;
+          output_schema?: Json | null;
+          enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+          created_by?: string | null;
+          updated_by?: string | null;
+        };
+        Update: Partial<Database['public']['Tables']['actions']['Insert']>;
       };
       skill_overrides: {
         Row: {
