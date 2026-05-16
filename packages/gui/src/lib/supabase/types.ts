@@ -177,6 +177,7 @@ export interface Database {
           effects: Json | null;
           output_schema: Json | null;
           enabled: boolean;
+          replaces_built_in: string | null;
           created_at: string;
           updated_at: string;
           created_by: string | null;
@@ -184,7 +185,7 @@ export interface Database {
         };
         Insert: Omit<Database['public']['Tables']['actions']['Row'],
           'id' | 'kind' | 'description' | 'system_prompt' | 'skill_refs' | 'triggers' |
-          'effects' | 'output_schema' | 'enabled' | 'created_at' | 'updated_at' |
+          'effects' | 'output_schema' | 'enabled' | 'replaces_built_in' | 'created_at' | 'updated_at' |
           'created_by' | 'updated_by'
         > & {
           id?: string;
@@ -196,6 +197,7 @@ export interface Database {
           effects?: Json | null;
           output_schema?: Json | null;
           enabled?: boolean;
+          replaces_built_in?: string | null;
           created_at?: string;
           updated_at?: string;
           created_by?: string | null;

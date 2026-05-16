@@ -193,6 +193,25 @@ export function SettingsGearIcon(props: IconProps) {
   return SettingsIcon(props);
 }
 
+export function BoltIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M13 3L4 13.5h6l-1 7.5 9-11h-6l1-7z" />
+    </svg>
+  );
+}
+
+export function TrashIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <path d="M4 7h16" />
+      <path d="M6 7l1 12a2 2 0 0 0 2 2h6a2 2 0 0 0 2-2l1-12" />
+      <path d="M9 7V4h6v3" />
+      <path d="M10 11v6M14 11v6" />
+    </svg>
+  );
+}
+
 export function StatusDotIcon({
   tone = 'enabled',
   ...props

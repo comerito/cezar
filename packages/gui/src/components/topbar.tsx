@@ -2,7 +2,7 @@
 
 import { useEffect, useMemo, useRef, useState, useTransition } from 'react';
 import Link from 'next/link';
-import { SearchIcon, BellIcon, SparkleSmallIcon, TerminalIcon } from './icons';
+import { SearchIcon, BellIcon, SparkleSmallIcon, TerminalIcon, BoltIcon } from './icons';
 import { cn } from './ui/cn';
 import { searchWorkspace, type SearchResult } from './topbar-actions';
 
@@ -134,6 +134,7 @@ function SearchDropdown({
   onSelect: () => void;
 }) {
   const skills = results.filter((r): r is Extract<SearchResult, { kind: 'skill' }> => r.kind === 'skill');
+  const actions = results.filter((r): r is Extract<SearchResult, { kind: 'action' }> => r.kind === 'action');
   const runs = results.filter((r): r is Extract<SearchResult, { kind: 'run' }> => r.kind === 'run');
   const empty = !pending && results.length === 0;
 
@@ -172,6 +173,40 @@ function SearchDropdown({
                   Override
                 </span>
               )}
+            </Link>
+          ))}
+        </Section>
+      )}
+      {actions.length > 0 && (
+        <Section title="Actions">
+          {actions.map((a) => (
+            <Link
+              key={`action:${a.name}`}
+              href={`/actions/${encodeURIComponent(a.name)}`}
+              onClick={onSelect}
+              className="flex items-center justify-between gap-3 px-4 py-2 hover:bg-surface-container-high"
+            >
+              <span className="inline-flex min-w-0 items-center gap-2">
+                <BoltIcon
+                  className={cn('h-4 w-4 shrink-0', a.actionKind === 'user' ? 'text-primary' : 'text-on-surface-variant')}
+                />
+                <span className="min-w-0 truncate text-sm text-on-surface">{a.name}</span>
+                {a.description && (
+                  <span className="hidden truncate text-xs text-on-surface-variant md:inline">
+                    — {a.description}
+                  </span>
+                )}
+              </span>
+              <span
+                className={cn(
+                  'shrink-0 rounded-md border px-1.5 py-0.5 font-display text-[10px] font-semibold uppercase tracking-[0.05em]',
+                  a.actionKind === 'user'
+                    ? 'border-primary/40 bg-primary-container/20 text-primary'
+                    : 'border-tertiary-container/60 bg-tertiary-container/30 text-tertiary',
+                )}
+              >
+                {a.actionKind === 'user' ? 'USER' : 'BUILT-IN'}
+              </span>
             </Link>
           ))}
         </Section>

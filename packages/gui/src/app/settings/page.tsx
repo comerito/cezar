@@ -110,6 +110,18 @@ export default async function SettingsPage() {
         </section>
 
         <section>
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">Actions</h2>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/actions"
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm text-fg-muted transition-colors hover:border-accent hover:text-fg"
+            >
+              Open the Actions cockpit →
+            </Link>
+          </div>
+        </section>
+
+        <section>
           <h2 className="mb-4 text-lg font-semibold tracking-tight">Automation</h2>
           <AutomationSection
             autoTriageEnabled={autoTriageEnabled}

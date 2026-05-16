@@ -79,8 +79,9 @@ function rowToAction(row: ActionRow): ActionDef {
 }
 
 /**
- * Look up a single Action by `(workspace_id, name)`. Returns null when the
- * row is absent — callers decide whether that's a hard error.
+ * Look up a single Action by `(workspace_id, name)`. When both a `built-in`
+ * and a `user` row exist for the same name (the override pattern), the user
+ * row wins. Returns null when no row matches.
  */
 export async function loadActionByName(
   supabase: unknown,
@@ -92,10 +93,9 @@ export async function loadActionByName(
     .from('actions')
     .select(ACTION_COLUMNS)
     .eq('workspace_id', workspaceId)
-    .eq('name', name)
-    .maybeSingle();
+    .eq('name', name);
   if (error) throw new Error(`loadActionByName(${name}) failed: ${error.message}`);
-  return data ? rowToAction(data) : null;
+  return pickPreferred(data ?? []);
 }
 
 /**
@@ -153,8 +153,30 @@ export async function listEnabledActions(
     .eq('enabled', true)
     .order('name', { ascending: true });
   if (error) throw new Error(`listEnabledActions failed: ${error.message}`);
-  let rows = (data ?? []).map(rowToAction);
+  const grouped = new Map<string, ActionRow[]>();
+  for (const row of data ?? []) {
+    const list = grouped.get(row.name) ?? [];
+    list.push(row);
+    grouped.set(row.name, list);
+  }
+  let rows: ActionDef[] = [];
+  for (const list of grouped.values()) {
+    const picked = pickPreferred(list);
+    if (picked) rows.push(picked);
+  }
+  rows.sort((a, b) => a.name.localeCompare(b.name));
   if (filter?.target) rows = rows.filter((a) => a.target === filter.target);
   if (filter?.trigger) rows = rows.filter((a) => a.triggers.includes(filter.trigger!));
   return rows;
+}
+
+/**
+ * Given a (possibly empty) set of rows sharing a name, return the user row
+ * when present, otherwise the built-in. Encapsulates the override-precedence
+ * rule so the same logic governs both single-name and full-list lookups.
+ */
+function pickPreferred(rows: ActionRow[]): ActionDef | null {
+  if (rows.length === 0) return null;
+  const user = rows.find((r) => r.kind === 'user');
+  return rowToAction(user ?? rows[0]);
 }
