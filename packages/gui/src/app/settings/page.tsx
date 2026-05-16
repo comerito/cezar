@@ -98,13 +98,21 @@ export default async function SettingsPage() {
 
       <div className="space-y-12">
         <section>
-          <h2 className="mb-4 text-lg font-semibold tracking-tight">Workflows</h2>
-          <Link
-            href="/settings/workflows"
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm text-fg-muted transition-colors hover:border-accent hover:text-fg"
-          >
-            Map skills, agent backends, and models onto pipeline steps →
-          </Link>
+          <h2 className="mb-4 text-lg font-semibold tracking-tight">Skills</h2>
+          <div className="flex flex-wrap gap-3">
+            <Link
+              href="/skills"
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm text-fg-muted transition-colors hover:border-accent hover:text-fg"
+            >
+              Open the Skills cockpit →
+            </Link>
+            <Link
+              href="/settings/workflows"
+              className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm text-fg-muted transition-colors hover:border-accent hover:text-fg"
+            >
+              Map skills, agent backends, and models onto pipeline steps →
+            </Link>
+          </div>
         </section>
 
         <section>

@@ -1,11 +1,12 @@
 import type { Metadata } from 'next';
 import './globals.css';
 import { Sidebar } from '@/components/sidebar';
+import { TopBar } from '@/components/topbar';
 import { getSessionUser } from '@/lib/auth';
 import { getActiveWorkspace, listWorkspaces } from '@/lib/workspace';
 
 export const metadata: Metadata = {
-  title: 'CEZAR',
+  title: 'Cezar AI',
   description: 'AI-powered GitHub issue management',
 };
 
@@ -17,7 +18,7 @@ export default async function RootLayout({ children }: { children: React.ReactNo
   if (isLoginPage) {
     return (
       <html lang="en" className="dark">
-        <body>{children}</body>
+        <body className="bg-surface text-on-surface">{children}</body>
       </html>
     );
   }
@@ -29,10 +30,13 @@ export default async function RootLayout({ children }: { children: React.ReactNo
 
   return (
     <html lang="en" className="dark">
-      <body>
+      <body className="bg-surface text-on-surface">
         <div className="flex min-h-screen">
           <Sidebar user={user} workspace={workspace} workspaces={workspaces} />
-          <main className="flex-1 overflow-x-hidden">{children}</main>
+          <div className="flex min-h-screen flex-1 flex-col overflow-x-hidden">
+            <TopBar user={user} />
+            <main className="flex-1">{children}</main>
+          </div>
         </div>
       </body>
     </html>
