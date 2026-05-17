@@ -1,14 +1,17 @@
 'use client';
 
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
 import { cn } from '@/components/ui/cn';
 import {
   SearchIcon,
   ChevronLeftIcon,
   ChevronRightIcon,
+  RefreshIcon,
 } from '@/components/icons';
 import { RunStatusDots } from '@/components/run-status-dots';
 import type { ActionRunSummary, RunStatus } from '@/lib/action-runs-loader';
+import { syncAndDigest } from '@/app/inbox/sync-action';
 import { IssueRowMenu } from './issue-row-menu';
 
 export interface IssueRow {
@@ -81,6 +84,9 @@ function topStatus(runs: ActionRunSummary[]): RunStatus | 'none' {
 }
 
 export function IssuesView({ rows, repoLabel, fetchedAt, readOnly }: IssuesViewProps) {
+  const router = useRouter();
+  const [syncing, startSync] = useTransition();
+  const [syncMessage, setSyncMessage] = useState<{ kind: 'ok' | 'error'; text: string } | null>(null);
   const [page, setPage] = useState(1);
   const [pageSize, setPageSize] = useState<PageSize>(10);
   const [search, setSearch] = useState('');
@@ -180,7 +186,51 @@ export function IssuesView({ rows, repoLabel, fetchedAt, readOnly }: IssuesViewP
           <p className="mt-1 text-sm text-on-surface-variant">
             <span className="font-mono">{repoLabel}</span> — {totalIssues} issue{totalIssues === 1 ? '' : 's'} synced
           </p>
+          {syncMessage && (
+            <p className={cn(
+              'mt-1 text-xs',
+              syncMessage.kind === 'error' ? 'text-error' : 'text-on-surface-variant',
+            )}>
+              {syncMessage.text}
+            </p>
+          )}
         </div>
+        {!readOnly && (
+          <button
+            type="button"
+            disabled={syncing}
+            onClick={() =>
+              startSync(async () => {
+                setSyncMessage(null);
+                const result = await syncAndDigest();
+                if (!result.ok) {
+                  setSyncMessage({ kind: 'error', text: `Sync failed: ${result.error ?? 'unknown'}` });
+                  return;
+                }
+                const bits: string[] = [];
+                if (result.issuesFetched) {
+                  bits.push(`${result.issuesFetched} issue${result.issuesFetched === 1 ? '' : 's'} (${result.issuesCreated ?? 0} new · ${result.issuesUpdated ?? 0} updated)`);
+                }
+                if (result.digestsCreated) bits.push(`${result.digestsCreated} digested`);
+                if (result.commentsFetched) bits.push(`${result.commentsFetched} commented`);
+                setSyncMessage({
+                  kind: 'ok',
+                  text: bits.length > 0 ? `Synced: ${bits.join(' · ')}` : 'Already up to date',
+                });
+                router.refresh();
+              })
+            }
+            className={cn(
+              'inline-flex h-9 items-center gap-2 rounded-md border px-4 text-sm font-medium transition-colors',
+              syncing
+                ? 'cursor-wait border-outline-variant bg-surface-container text-on-surface-variant'
+                : 'border-primary/40 bg-primary/10 text-primary hover:border-primary/60 hover:bg-primary/15',
+            )}
+          >
+            <RefreshIcon className={cn('h-4 w-4', syncing && 'animate-spin')} />
+            {syncing ? 'Syncing…' : 'Sync & Digest'}
+          </button>
+        )}
       </header>
 
       <div className="mb-6 grid gap-4 sm:grid-cols-2 lg:grid-cols-4">

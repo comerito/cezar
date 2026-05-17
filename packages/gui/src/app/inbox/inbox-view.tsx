@@ -32,6 +32,7 @@ import {
   dismissDecisions,
   snoozeDecision,
 } from './decision-actions';
+import { syncAndDigest } from './sync-action';
 
 // ─────────────────────────────────────────────────────────────────────
 // Skill palette — each skill gets its own accent so confidence pills
@@ -363,11 +364,25 @@ export function InboxView({
 
   const handleSync = useCallback(async () => {
     setSyncing(true);
-    await new Promise((r) => setTimeout(r, 900));
+    const result = await syncAndDigest();
     setSyncing(false);
+    if (!result.ok) {
+      setToast(`Sync failed: ${result.error ?? 'unknown'}`);
+      return;
+    }
     setSyncedAt(Date.now());
-    setToast('Sync complete');
-  }, []);
+    const bits: string[] = [];
+    if (result.issuesFetched) {
+      const created = result.issuesCreated ?? 0;
+      const updated = result.issuesUpdated ?? 0;
+      bits.push(`${result.issuesFetched} issue${result.issuesFetched === 1 ? '' : 's'} (${created} new · ${updated} updated)`);
+    }
+    if (result.digestsCreated) bits.push(`${result.digestsCreated} digested`);
+    if (result.commentsFetched) bits.push(`${result.commentsFetched} commented`);
+    if (result.prsUpdated) bits.push(`${result.prsUpdated} PR${result.prsUpdated === 1 ? '' : 's'}`);
+    setToast(bits.length > 0 ? `Synced: ${bits.join(' · ')}` : 'Already up to date');
+    router.refresh();
+  }, [router]);
 
   // ── keyboard: Cmd+A / Ctrl+A selects all visible findings ──
   useEffect(() => {
