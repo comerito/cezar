@@ -5,7 +5,10 @@ import type { InboxItem, DecisionItem, Finding, SkillTag, FindingBody } from './
 // Server-side loader for the inbox. Reads three sources in parallel:
 //   1. pending_decisions  — agent findings awaiting human accept/dismiss
 //   2. workflow_runs      — paused (waiting at human-gate) + failed (24h)
-//   3. pull_requests      — open, non-draft
+//   3. pull_requests      — open, non-draft, **and** opened by a Cezar
+//                           workflow_run (a row exists in workflow_runs
+//                           pointing at the same pr_number). Random
+//                           human-authored PRs in the repo aren't ours.
 // and projects them into the InboxItem union the client view already uses.
 // ─────────────────────────────────────────────────────────────────────
 
@@ -77,7 +80,7 @@ export async function loadInbox(workspaceId: string): Promise<LoadedInbox> {
   const failedSince = new Date(Date.now() - 24 * 60 * 60 * 1000).toISOString();
   const nowIso = new Date().toISOString();
 
-  const [pendingRes, pausedRes, failedRes, prsRes] = await Promise.all([
+  const [pendingRes, pausedRes, failedRes, cezarPrRunsRes] = await Promise.all([
     supabase
       .from('pending_decisions')
       .select(
@@ -108,16 +111,44 @@ export async function loadInbox(workspaceId: string): Promise<LoadedInbox> {
       .order('finished_at', { ascending: false })
       .limit(20)
       .returns<FailedRunRow[]>(),
+    // Cezar's "I opened a PR" trail. Pull every workflow_run that recorded
+    // a pr_number — the resulting (pr_number → workflow) map is what we use
+    // both to filter `pull_requests` (only Cezar's show up in the inbox)
+    // and to label each row with the right workflow name.
     supabase
-      .from('pull_requests')
-      .select('id, number, title, author, html_url, pr_created_at, pr_updated_at')
+      .from('workflow_runs')
+      .select('pr_number, workflow, created_at')
       .eq('workspace_id', workspaceId)
-      .eq('state', 'open')
-      .eq('draft', false)
-      .order('pr_updated_at', { ascending: false })
-      .limit(20)
-      .returns<PrRow[]>(),
+      .not('pr_number', 'is', null)
+      .order('created_at', { ascending: true })
+      .returns<{ pr_number: number; workflow: string; created_at: string }[]>(),
   ]);
+
+  // Build pr_number → workflow. Later writes win, so iterating in
+  // chronological order leaves the most recent workflow as the label
+  // (e.g. ci-followup overrides the original autofix label).
+  const cezarPrWorkflow = new Map<number, string>();
+  for (const r of cezarPrRunsRes.data ?? []) {
+    cezarPrWorkflow.set(r.pr_number, r.workflow);
+  }
+  const cezarPrNumbers = Array.from(cezarPrWorkflow.keys());
+
+  // Now fetch the open, non-draft PRs constrained to Cezar's set. Skipping
+  // the round trip entirely when there are no Cezar PRs avoids a wasted
+  // `in()` with an empty array (which Supabase treats as "match all").
+  const prsRes =
+    cezarPrNumbers.length > 0
+      ? await supabase
+          .from('pull_requests')
+          .select('id, number, title, author, html_url, pr_created_at, pr_updated_at')
+          .eq('workspace_id', workspaceId)
+          .eq('state', 'open')
+          .eq('draft', false)
+          .in('number', cezarPrNumbers)
+          .order('pr_updated_at', { ascending: false })
+          .limit(20)
+          .returns<PrRow[]>()
+      : { data: [] as PrRow[] };
 
   // Resolve action_id → action.name in one round trip so we can render skill tags.
   const actionIds = Array.from(new Set((pendingRes.data ?? []).map((p) => p.action_id)));
@@ -134,7 +165,7 @@ export async function loadInbox(workspaceId: string): Promise<LoadedInbox> {
   const items: InboxItem[] = [];
   items.push(...buildFailedItems(failedRes.data ?? []));
   items.push(...buildPausedItems(pausedRes.data ?? []));
-  items.push(...buildPrItems(prsRes.data ?? []));
+  items.push(...buildPrItems(prsRes.data ?? [], cezarPrWorkflow));
   items.push(...buildDecisionItems(pendingRes.data ?? [], actionNamesById));
 
   // Dedup the action filter options across whatever pending rows landed.
@@ -187,13 +218,15 @@ function buildPausedItems(rows: PausedRunRow[]): InboxItem[] {
   }));
 }
 
-function buildPrItems(rows: PrRow[]): InboxItem[] {
+function buildPrItems(rows: PrRow[], cezarPrWorkflow: Map<number, string>): InboxItem[] {
   return rows.map((r) => ({
     kind: 'pr' as const,
     id: r.id,
     prNumber: r.number,
     title: r.title,
-    agent: 'autofix',
+    // The filter upstream guarantees every row is in the map; fall back to
+    // 'autofix' only as a defensive default that should never fire.
+    agent: cezarPrWorkflow.get(r.number) ?? 'autofix',
     ageMin: ageMinutes(r.pr_created_at ?? r.pr_updated_at),
   }));
 }
