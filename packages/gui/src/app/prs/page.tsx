@@ -1,6 +1,7 @@
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { getActiveWorkspace } from '@/lib/workspace';
-import { PrsView, type PrRow, type RunIndicatorStatus } from './prs-view';
+import { fetchRecentActionRuns } from '@/lib/action-runs-loader';
+import { PrsView, type PrRow } from './prs-view';
 
 export default async function PrsPage() {
   const workspace = await getActiveWorkspace();
@@ -23,7 +24,7 @@ export default async function PrsPage() {
   let loadError: string | null = null;
 
   try {
-    const [{ data: prRows, error: prErr }, latestRunByPr] = await Promise.all([
+    const [{ data: prRows, error: prErr }, actionRunsByPr] = await Promise.all([
       supabase
         .from('pull_requests')
         .select(
@@ -31,7 +32,7 @@ export default async function PrsPage() {
         )
         .eq('workspace_id', workspace.id)
         .order('number', { ascending: false }),
-      fetchLatestRunStatusByPr(workspace.id),
+      fetchRecentActionRuns(workspace.id, 'pr'),
     ]);
     if (prErr) throw new Error(prErr.message);
 
@@ -46,7 +47,7 @@ export default async function PrsPage() {
       headRef: p.head_ref,
       baseRef: p.base_ref,
       prUpdatedAt: p.pr_updated_at,
-      runStatus: latestRunByPr.get(p.number) ?? 'none',
+      actionRuns: actionRunsByPr.get(p.number) ?? [],
     }));
 
     // Most recent upstream PR update is a reasonable "last refreshed" stamp.
@@ -78,66 +79,6 @@ export default async function PrsPage() {
       readOnly={workspace.role !== 'admin'}
     />
   );
-}
-
-/**
- * For each pr_number, return the single `RunIndicatorStatus` that best
- * represents its current state — newest workflow_runs row wins; a queued
- * job upgrades a missing entry to `queued`. Mirrors `fetchLatestRunStatusByIssue`
- * in `/issues/page.tsx`.
- */
-async function fetchLatestRunStatusByPr(workspaceId: string): Promise<Map<number, RunIndicatorStatus>> {
-  const supabase = createSupabaseAdminClient();
-
-  const [{ data: runs }, { data: jobs }] = await Promise.all([
-    supabase
-      .from('workflow_runs')
-      .select('pr_number, status, created_at')
-      .eq('workspace_id', workspaceId)
-      .not('pr_number', 'is', null)
-      .order('created_at', { ascending: false }),
-    supabase
-      .from('jobs')
-      .select('pr_number, status')
-      .eq('workspace_id', workspaceId)
-      .in('status', ['queued', 'claimed'])
-      .not('pr_number', 'is', null),
-  ]);
-
-  const out = new Map<number, RunIndicatorStatus>();
-
-  for (const r of runs ?? []) {
-    if (r.pr_number == null) continue;
-    if (out.has(r.pr_number)) continue;
-    const mapped = mapRunStatus(r.status);
-    if (mapped !== null) out.set(r.pr_number, mapped);
-  }
-
-  for (const j of jobs ?? []) {
-    if (j.pr_number == null) continue;
-    if (!out.has(j.pr_number)) out.set(j.pr_number, 'queued');
-  }
-
-  return out;
-}
-
-function mapRunStatus(status: string): RunIndicatorStatus | null {
-  switch (status) {
-    case 'queued':
-      return 'queued';
-    case 'running':
-      return 'running';
-    case 'paused':
-      return 'paused';
-    case 'succeeded':
-      return 'succeeded';
-    case 'failed':
-      return 'failed';
-    case 'cancelled':
-      return null;
-    default:
-      return null;
-  }
 }
 
 function EmptyState({

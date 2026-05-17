@@ -7,9 +7,9 @@ import {
   ChevronLeftIcon,
   ChevronRightIcon,
 } from '@/components/icons';
+import { RunStatusDots } from '@/components/run-status-dots';
+import type { ActionRunSummary, RunStatus } from '@/lib/action-runs-loader';
 import { IssueRowMenu } from './issue-row-menu';
-
-export type RunIndicatorStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'paused' | 'none';
 
 export interface IssueRow {
   number: number;
@@ -20,8 +20,9 @@ export interface IssueRow {
   issueType: 'bug' | 'feature' | 'question' | 'other' | null;
   labels: string[];
   commentCount: number;
-  /** Latest workflow_run / queued job for this issue, collapsed server-side. */
-  runStatus: RunIndicatorStatus;
+  /** Most-recent agent_runs against this issue, newest first, capped at 5
+   *  by the loader. Each one renders as a dot in the status column. */
+  actionRuns: ActionRunSummary[];
   /** Backing store status — disables the autofix kebab item when 'pr-opened'. */
   autofixStatus: 'pending' | 'running' | 'succeeded' | 'failed' | 'skipped' | 'pr-opened' | null;
 }
@@ -36,7 +37,7 @@ interface IssuesViewProps {
 type StateFilter = 'all' | 'open' | 'closed';
 type PriorityFilter = 'all' | NonNullable<IssueRow['priority']> | 'unset';
 type TypeFilter = 'all' | NonNullable<IssueRow['issueType']> | 'unset';
-type RunStatusFilter = 'all' | 'running' | 'enqueued' | 'succeeded' | 'failed' | 'none';
+type RunStatusFilter = 'all' | 'has-runs' | 'running' | 'enqueued' | 'succeeded' | 'failed' | 'none';
 
 type SortKey = 'runStatus' | 'number' | 'title' | 'state' | 'priority' | 'comments';
 type SortDir = 'asc' | 'desc';
@@ -52,14 +53,32 @@ const PRIORITY_RANK: Record<NonNullable<IssueRow['priority']>, number> = {
 };
 
 // Higher = more "attention needed", used for the status column sort.
-const RUN_STATUS_RANK: Record<RunIndicatorStatus, number> = {
+// Picks the most-attention-needed status across the row's action runs.
+const RUN_STATUS_RANK: Record<RunStatus | 'none', number> = {
   running: 5,
   queued: 4,
   failed: 3,
   paused: 2,
   succeeded: 1,
+  skipped: 0,
   none: 0,
 };
+
+/** Returns the worst-case status across all of the row's runs — drives both
+ *  the legacy filter options and sort ranking. 'none' for empty. */
+function topStatus(runs: ActionRunSummary[]): RunStatus | 'none' {
+  if (runs.length === 0) return 'none';
+  let best: RunStatus = runs[0].status;
+  let bestRank = RUN_STATUS_RANK[best];
+  for (const r of runs) {
+    const rank = RUN_STATUS_RANK[r.status];
+    if (rank > bestRank) {
+      best = r.status;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
 
 export function IssuesView({ rows, repoLabel, fetchedAt, readOnly }: IssuesViewProps) {
   const [page, setPage] = useState(1);
@@ -83,9 +102,14 @@ export function IssuesView({ rows, repoLabel, fetchedAt, readOnly }: IssuesViewP
         if (typeFilter === 'unset' ? r.issueType !== null : r.issueType !== typeFilter) return false;
       }
       if (runStatusFilter !== 'all') {
-        if (runStatusFilter === 'enqueued') {
-          if (r.runStatus !== 'queued') return false;
-        } else if (r.runStatus !== runStatusFilter) {
+        const top = topStatus(r.actionRuns);
+        if (runStatusFilter === 'has-runs') {
+          if (r.actionRuns.length === 0) return false;
+        } else if (runStatusFilter === 'enqueued') {
+          if (top !== 'queued') return false;
+        } else if (runStatusFilter === 'none') {
+          if (r.actionRuns.length > 0) return false;
+        } else if (top !== runStatusFilter) {
           return false;
         }
       }
@@ -119,7 +143,9 @@ export function IssuesView({ rows, repoLabel, fetchedAt, readOnly }: IssuesViewP
   const totalIssues = rows.length;
   const openCount = rows.filter((r) => r.state === 'open').length;
   const bugCount = rows.filter((r) => r.issueType === 'bug').length;
-  const runningCount = rows.filter((r) => r.runStatus === 'running' || r.runStatus === 'queued').length;
+  const runningCount = rows.filter((r) =>
+    r.actionRuns.some((run) => run.status === 'running' || run.status === 'queued'),
+  ).length;
 
   const filtersActive =
     search.trim().length > 0 ||
@@ -238,6 +264,7 @@ export function IssuesView({ rows, repoLabel, fetchedAt, readOnly }: IssuesViewP
           }}
           options={[
             { value: 'all', label: 'All' },
+            { value: 'has-runs', label: 'Has any run' },
             { value: 'running', label: 'Running' },
             { value: 'enqueued', label: 'Enqueued' },
             { value: 'succeeded', label: 'Succeeded' },
@@ -445,7 +472,8 @@ function compareByKey(a: IssueRow, b: IssueRow, key: SortKey): number {
     return av - bv || a.number - b.number;
   }
   if (key === 'runStatus') {
-    return RUN_STATUS_RANK[a.runStatus] - RUN_STATUS_RANK[b.runStatus] || a.number - b.number;
+    return RUN_STATUS_RANK[topStatus(a.actionRuns)] - RUN_STATUS_RANK[topStatus(b.actionRuns)]
+      || a.number - b.number;
   }
   const av = String(a[key as 'title' | 'state']);
   const bv = String(b[key as 'title' | 'state']);
@@ -454,11 +482,15 @@ function compareByKey(a: IssueRow, b: IssueRow, key: SortKey): number {
 }
 
 function IssueTableRow({ row, readOnly }: { row: IssueRow; readOnly: boolean }) {
-  const autofixDisabled = row.state === 'closed' || row.autofixStatus === 'pr-opened' || row.runStatus === 'running' || row.runStatus === 'queued';
+  const hasInflight = row.actionRuns.some(
+    (r) => r.status === 'running' || r.status === 'queued',
+  );
+  const autofixDisabled =
+    row.state === 'closed' || row.autofixStatus === 'pr-opened' || hasInflight;
   return (
     <tr className="border-t border-outline-variant/60 hover:bg-surface-container/60">
       <td className="px-4 py-4 align-middle">
-        <RunStatusDot status={row.runStatus} />
+        <RunStatusDots runs={row.actionRuns} />
       </td>
       <td className="px-6 py-4 align-middle">
         <span className="font-mono text-[13px] text-on-surface-variant">#{row.number}</span>
@@ -505,34 +537,6 @@ function IssueTableRow({ row, readOnly }: { row: IssueRow; readOnly: boolean }) 
         </div>
       </td>
     </tr>
-  );
-}
-
-function RunStatusDot({ status }: { status: RunIndicatorStatus }) {
-  if (status === 'none') {
-    return <span className="block h-[18px] w-[18px]" aria-label="no runs" />;
-  }
-  const colorClass =
-    status === 'queued'
-      ? 'bg-[#8c909f]'
-      : status === 'running'
-        ? 'bg-[#60a5fa]'
-        : status === 'succeeded'
-          ? 'bg-[#22c55e]'
-          : status === 'paused'
-            ? 'bg-[#ffb786]'
-            : 'bg-[#ffb4ab]';
-  const label = status === 'queued' ? 'enqueued' : status;
-  return (
-    <span
-      className={cn(
-        'inline-block h-[18px] w-[18px] rounded-full',
-        colorClass,
-        status === 'running' && 'animate-pulse',
-      )}
-      aria-label={label}
-      title={label}
-    />
   );
 }
 

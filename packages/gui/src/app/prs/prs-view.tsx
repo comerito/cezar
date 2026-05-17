@@ -4,10 +4,10 @@ import { useEffect, useMemo, useState, useTransition } from 'react';
 import { useRouter } from 'next/navigation';
 import { cn } from '@/components/ui/cn';
 import { SearchIcon, ChevronLeftIcon, ChevronRightIcon, RefreshIcon } from '@/components/icons';
+import { RunStatusDots } from '@/components/run-status-dots';
+import type { ActionRunSummary, RunStatus } from '@/lib/action-runs-loader';
 import { PrRowMenu } from './pr-row-menu';
 import { syncPullRequests } from './prs-action';
-
-export type RunIndicatorStatus = 'queued' | 'running' | 'succeeded' | 'failed' | 'paused' | 'none';
 
 export interface PrRow {
   number: number;
@@ -20,7 +20,8 @@ export interface PrRow {
   headRef: string | null;
   baseRef: string | null;
   prUpdatedAt: string | null;
-  runStatus: RunIndicatorStatus;
+  /** Most-recent agent_runs against this PR, newest first, capped by the loader. */
+  actionRuns: ActionRunSummary[];
 }
 
 interface PrsViewProps {
@@ -32,7 +33,7 @@ interface PrsViewProps {
 
 type StateFilter = 'all' | 'open' | 'closed';
 type DraftFilter = 'all' | 'draft' | 'ready';
-type RunStatusFilter = 'all' | 'running' | 'enqueued' | 'succeeded' | 'failed' | 'none';
+type RunStatusFilter = 'all' | 'has-runs' | 'running' | 'enqueued' | 'succeeded' | 'failed' | 'none';
 
 type SortKey = 'runStatus' | 'number' | 'title' | 'state' | 'author' | 'prUpdatedAt';
 type SortDir = 'asc' | 'desc';
@@ -40,14 +41,29 @@ type SortDir = 'asc' | 'desc';
 const PAGE_SIZE_OPTIONS = [10, 25, 50, 100] as const;
 type PageSize = (typeof PAGE_SIZE_OPTIONS)[number];
 
-const RUN_STATUS_RANK: Record<RunIndicatorStatus, number> = {
+const RUN_STATUS_RANK: Record<RunStatus | 'none', number> = {
   running: 5,
   queued: 4,
   failed: 3,
   paused: 2,
   succeeded: 1,
+  skipped: 0,
   none: 0,
 };
+
+function topStatus(runs: ActionRunSummary[]): RunStatus | 'none' {
+  if (runs.length === 0) return 'none';
+  let best: RunStatus = runs[0].status;
+  let bestRank = RUN_STATUS_RANK[best];
+  for (const r of runs) {
+    const rank = RUN_STATUS_RANK[r.status];
+    if (rank > bestRank) {
+      best = r.status;
+      bestRank = rank;
+    }
+  }
+  return best;
+}
 
 export function PrsView({ rows, repoLabel, fetchedAt, readOnly }: PrsViewProps) {
   const router = useRouter();
@@ -70,9 +86,14 @@ export function PrsView({ rows, repoLabel, fetchedAt, readOnly }: PrsViewProps) 
         if (draftFilter === 'draft' ? !r.draft : r.draft) return false;
       }
       if (runStatusFilter !== 'all') {
-        if (runStatusFilter === 'enqueued') {
-          if (r.runStatus !== 'queued') return false;
-        } else if (r.runStatus !== runStatusFilter) {
+        const top = topStatus(r.actionRuns);
+        if (runStatusFilter === 'has-runs') {
+          if (r.actionRuns.length === 0) return false;
+        } else if (runStatusFilter === 'enqueued') {
+          if (top !== 'queued') return false;
+        } else if (runStatusFilter === 'none') {
+          if (r.actionRuns.length > 0) return false;
+        } else if (top !== runStatusFilter) {
           return false;
         }
       }
@@ -106,7 +127,9 @@ export function PrsView({ rows, repoLabel, fetchedAt, readOnly }: PrsViewProps) 
   const totalPrs = rows.length;
   const openCount = rows.filter((r) => r.state === 'open').length;
   const draftCount = rows.filter((r) => r.draft).length;
-  const runningCount = rows.filter((r) => r.runStatus === 'running' || r.runStatus === 'queued').length;
+  const runningCount = rows.filter((r) =>
+    r.actionRuns.some((run) => run.status === 'running' || run.status === 'queued'),
+  ).length;
 
   const filtersActive =
     search.trim().length > 0 ||
@@ -235,6 +258,7 @@ export function PrsView({ rows, repoLabel, fetchedAt, readOnly }: PrsViewProps) 
           }}
           options={[
             { value: 'all', label: 'All' },
+            { value: 'has-runs', label: 'Has any run' },
             { value: 'running', label: 'Running' },
             { value: 'enqueued', label: 'Enqueued' },
             { value: 'succeeded', label: 'Succeeded' },
@@ -434,7 +458,8 @@ function FilterSelect<T extends string>({
 function compareByKey(a: PrRow, b: PrRow, key: SortKey): number {
   if (key === 'number') return a.number - b.number;
   if (key === 'runStatus') {
-    return RUN_STATUS_RANK[a.runStatus] - RUN_STATUS_RANK[b.runStatus] || a.number - b.number;
+    return RUN_STATUS_RANK[topStatus(a.actionRuns)] - RUN_STATUS_RANK[topStatus(b.actionRuns)]
+      || a.number - b.number;
   }
   if (key === 'prUpdatedAt') {
     const ta = a.prUpdatedAt ? new Date(a.prUpdatedAt).getTime() : -Infinity;
@@ -452,7 +477,7 @@ function PrTableRow({ row, readOnly }: { row: PrRow; readOnly: boolean }) {
   return (
     <tr className="border-t border-outline-variant/60 hover:bg-surface-container/60">
       <td className="px-4 py-4 align-middle">
-        <RunStatusDot status={row.runStatus} />
+        <RunStatusDots runs={row.actionRuns} />
       </td>
       <td className="px-6 py-4 align-middle">
         <span className="font-mono text-[13px] text-on-surface-variant">#{row.number}</span>
@@ -497,33 +522,6 @@ function PrTableRow({ row, readOnly }: { row: PrRow; readOnly: boolean }) {
   );
 }
 
-function RunStatusDot({ status }: { status: RunIndicatorStatus }) {
-  if (status === 'none') {
-    return <span className="block h-[18px] w-[18px]" aria-label="no runs" />;
-  }
-  const colorClass =
-    status === 'queued'
-      ? 'bg-[#8c909f]'
-      : status === 'running'
-        ? 'bg-[#60a5fa]'
-        : status === 'succeeded'
-          ? 'bg-[#22c55e]'
-          : status === 'paused'
-            ? 'bg-[#ffb786]'
-            : 'bg-[#ffb4ab]';
-  const label = status === 'queued' ? 'enqueued' : status;
-  return (
-    <span
-      className={cn(
-        'inline-block h-[18px] w-[18px] rounded-full',
-        colorClass,
-        status === 'running' && 'animate-pulse',
-      )}
-      aria-label={label}
-      title={label}
-    />
-  );
-}
 
 function StateBadge({ state, draft }: { state: 'open' | 'closed'; draft: boolean }) {
   if (draft) {
