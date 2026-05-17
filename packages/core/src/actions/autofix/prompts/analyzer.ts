@@ -1,5 +1,6 @@
 import { z } from 'zod';
 import { ROOT_CAUSE_ANALYSIS_SKILL } from '../skills.js';
+import { AGENT_EXECUTION_GUIDANCE } from './agent-guidance.js';
 
 export const RootCauseSchema = z.object({
   summary: z.string(),
@@ -52,7 +53,7 @@ If you determine NO code change is needed — for example the bug is already fix
   "reason": "one short paragraph explaining the conclusion. Cite commit hashes, file paths, or test names as evidence."
 }
 
-Always return exactly one of these two JSON shapes — never freeform prose, never an empty response. If you are uncertain whether a fix is needed, prefer the noActionNeeded shape over inventing a hypothesis.`;
+Always return exactly one of these two JSON shapes — never freeform prose, never an empty response. If you are uncertain whether a fix is needed, prefer the noActionNeeded shape over inventing a hypothesis.${AGENT_EXECUTION_GUIDANCE}`;
 
 const BODY_MAX_CHARS = 3000;
 const COMMENT_MAX_CHARS = 800;

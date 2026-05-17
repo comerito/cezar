@@ -23,6 +23,7 @@ import {
   type ReviewVerdict,
 } from '../../actions/autofix/prompts/reviewer.js';
 import { buildCommitMessage, buildPrBody } from '../../actions/autofix/messages.js';
+import { AGENT_EXECUTION_GUIDANCE } from '../../actions/autofix/prompts/agent-guidance.js';
 import { agentStep, type Workflow, type WorkflowStep, type CommentSection } from '../workflow.js';
 
 /**
@@ -61,7 +62,7 @@ OUTPUT — output ONLY a single JSON object (no markdown fences, no prose):
   "isRealUnfixedDefect": true | false,
   "reason": "one short paragraph. Cite commit hashes, file paths, or test names as evidence.",
   "confidence": 0.0 to 1.0
-}`;
+}${AGENT_EXECUTION_GUIDANCE}`;
 
 // ─── Blackboard ─────────────────────────────────────────────────────────────
 

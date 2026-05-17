@@ -71,8 +71,11 @@ export const ConfigSchema = z.object({
     prLabels: z.array(z.string()).default(['cezar-autofix']),
     skillsDir: z.string().default('.ai/skills'),
     models: z.object({
-      analyzer: z.string().default('claude-sonnet-4-20250514'),
-      fixer: z.string().default('claude-sonnet-4-20250514'),
+      // Defaults bumped 2026-05-17: was claude-sonnet-4-20250514 (~6 months
+      // old, slower per-turn). Sonnet 4.6 reaches the same conclusion in
+      // fewer turns; Haiku 4.5 stays as the cheap reviewer.
+      analyzer: z.string().default('claude-sonnet-4-6'),
+      fixer: z.string().default('claude-sonnet-4-6'),
       reviewer: z.string().default('claude-haiku-4-5-20251001'),
     }).default({}),
     maxTurns: z.object({

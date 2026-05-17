@@ -51,6 +51,15 @@ export class AnthropicApiRunner implements AgentRunner {
       return { behavior: 'allow' };
     };
 
+    // Prompt caching: `@anthropic-ai/claude-agent-sdk` auto-applies
+    // `cache_control` on the system prompt + tools when calling Anthropic
+    // (see node_modules/@anthropic-ai/claude-agent-sdk/cli.js — grep
+    // `cache_control`). The `Options` type doesn't expose a knob for it,
+    // so the right way to maximise cache hit rate is to keep `systemPrompt`
+    // **static** across runs — put any per-issue/per-repo variation in
+    // `userPrompt` instead. AGENT_EXECUTION_GUIDANCE in
+    // actions/autofix/prompts/agent-guidance.ts is deliberately shared
+    // across all four autofix agents for this reason.
     const queryOpts: QueryOptions = {
       cwd: spec.cwd,
       systemPrompt: spec.systemPrompt,
