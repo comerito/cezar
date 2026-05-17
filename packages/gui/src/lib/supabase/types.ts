@@ -113,6 +113,36 @@ export interface Database {
         Insert: Omit<Database['public']['Tables']['issues']['Row'], 'id'> & { id?: string };
         Update: Partial<Database['public']['Tables']['issues']['Insert']>;
       };
+      pull_requests: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          number: number;
+          title: string;
+          body: string;
+          state: 'open' | 'closed';
+          draft: boolean;
+          labels: string[];
+          author: string;
+          html_url: string;
+          head_sha: string | null;
+          head_ref: string | null;
+          base_ref: string | null;
+          pr_created_at: string | null;
+          pr_updated_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database['public']['Tables']['pull_requests']['Row'],
+          'id' | 'created_at' | 'updated_at'
+        > & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['pull_requests']['Insert']>;
+      };
       user_github_tokens: {
         Row: {
           user_id: string;

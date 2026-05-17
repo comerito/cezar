@@ -64,10 +64,7 @@ export async function POST(req: Request): Promise<NextResponse> {
       case 'check_run':
         return await handleCheckRun(admin, payload);
       case 'pull_request':
-        // PR↔issue linking is no longer tracked separately; the autofix workflow
-        // owns the PR it opens and the cockpit links runs to their PRs via
-        // `workflow_runs.pr_number`. No-op here for now.
-        return NextResponse.json({ ok: true, ignored: 'pull_request not used' });
+        return await handlePullRequest(admin, payload);
       case 'installation':
       case 'installation_repositories':
         return await handleInstallation(admin, payload);
@@ -102,6 +99,7 @@ interface WebhookPayload {
   action?: string;
   changes?: { title?: unknown; body?: unknown };
   issue?: WebhookIssue;
+  pull_request?: WebhookPullRequest;
   repository?: { name: string; owner: { login: string } };
   installation?: { id: number };
   check_run?: {
@@ -112,6 +110,21 @@ interface WebhookPayload {
     html_url: string | null;
     pull_requests?: Array<{ number: number; head?: { ref?: string }; base?: { ref?: string } }>;
   };
+}
+
+interface WebhookPullRequest {
+  number: number;
+  title: string;
+  body: string | null;
+  state: string;
+  draft?: boolean;
+  user?: { login: string } | null;
+  html_url: string;
+  labels?: Array<{ name: string }>;
+  head?: { sha?: string; ref?: string } | null;
+  base?: { ref?: string } | null;
+  created_at: string;
+  updated_at: string;
 }
 
 // ─── issues ─────────────────────────────────────────────────────────────────
@@ -281,6 +294,68 @@ async function handleCheckRun(admin: SupabaseAdmin, payload: WebhookPayload): Pr
   }
 
   return NextResponse.json({ ok: true, enqueued, workspaces: workspaces.length });
+}
+
+// ─── pull_request ───────────────────────────────────────────────────────────
+
+const PR_UPSERT_ACTIONS = new Set([
+  'opened',
+  'reopened',
+  'edited',
+  'synchronize',
+  'ready_for_review',
+  'converted_to_draft',
+  'labeled',
+  'unlabeled',
+]);
+const PR_CLOSE_ACTIONS = new Set(['closed']);
+
+async function handlePullRequest(admin: SupabaseAdmin, payload: WebhookPayload): Promise<NextResponse> {
+  const action = payload.action ?? '';
+  const pr = payload.pull_request;
+  const repo = payload.repository;
+  if (!pr || !repo) return NextResponse.json({ ok: true, ignored: 'pull_request missing payload/repo' });
+
+  if (!PR_UPSERT_ACTIONS.has(action) && !PR_CLOSE_ACTIONS.has(action)) {
+    return NextResponse.json({ ok: true, ignored: `pull_request.${action}` });
+  }
+
+  const workspaces = await resolveWorkspaces(admin, payload, repo);
+  if (workspaces.length === 0) return NextResponse.json({ ok: true, ignored: 'no matching workspace' });
+
+  const labels = Array.isArray(pr.labels)
+    ? pr.labels.map((l) => l?.name).filter((n): n is string => typeof n === 'string' && n.length > 0)
+    : [];
+
+  let upserts = 0;
+  for (const ws of workspaces) {
+    const { error } = await admin.from('pull_requests').upsert(
+      {
+        workspace_id: ws.id,
+        number: pr.number,
+        title: pr.title,
+        body: pr.body ?? '',
+        state: pr.state === 'closed' ? 'closed' : 'open',
+        draft: pr.draft ?? false,
+        labels,
+        author: pr.user?.login ?? 'unknown',
+        html_url: pr.html_url,
+        head_sha: pr.head?.sha ?? null,
+        head_ref: pr.head?.ref ?? null,
+        base_ref: pr.base?.ref ?? null,
+        pr_created_at: pr.created_at,
+        pr_updated_at: pr.updated_at,
+      },
+      { onConflict: 'workspace_id,number' },
+    );
+    if (error) {
+      console.error(`[github-webhook] pull_request upsert failed for ws ${ws.id}:`, error.message);
+      continue;
+    }
+    upserts++;
+  }
+
+  return NextResponse.json({ ok: true, upserts, workspaces: workspaces.length });
 }
 
 // ─── installation ───────────────────────────────────────────────────────────

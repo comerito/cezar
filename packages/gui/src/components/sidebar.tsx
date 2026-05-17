@@ -5,6 +5,7 @@ import { NavLink } from './nav-link';
 import {
   InboxIcon,
   IssuesIcon,
+  PullRequestIcon,
   SparkleIcon,
   BoltIcon,
   TerminalIcon,
@@ -18,6 +19,7 @@ import { cn } from './ui/cn';
 const NAV = [
   { href: '/dashboard', label: 'Inbox',    icon: <InboxIcon className="h-5 w-5" /> },
   { href: '/issues',    label: 'Issues',   icon: <IssuesIcon className="h-5 w-5" /> },
+  { href: '/prs',       label: 'PRs',      icon: <PullRequestIcon className="h-5 w-5" /> },
   { href: '/skills',    label: 'Skills',   icon: <SparkleIcon className="h-5 w-5" /> },
   { href: '/actions',   label: 'Actions',  icon: <BoltIcon className="h-5 w-5" /> },
   { href: '/cockpit',   label: 'Runs',     icon: <TerminalIcon className="h-5 w-5" /> },

@@ -30,6 +30,22 @@ export function IssuesIcon(props: IconProps) {
   );
 }
 
+// Approximates GitHub's pull-request icon: two stacked branch circles connected
+// by a downward arrow, signalling "merge this branch into another."
+export function PullRequestIcon(props: IconProps) {
+  return (
+    <svg {...base} {...props}>
+      <circle cx="6" cy="6" r="2" />
+      <circle cx="6" cy="18" r="2" />
+      <circle cx="18" cy="18" r="2" />
+      <path d="M6 8v8" />
+      <path d="M18 8v8" />
+      <path d="M18 8a4 4 0 0 0-4-4h-2" />
+      <path d="M14 2l-2 2 2 2" />
+    </svg>
+  );
+}
+
 export function SparkleIcon(props: IconProps) {
   return (
     <svg {...base} {...props}>
@@ -215,7 +231,9 @@ export function TrashIcon(props: IconProps) {
 export function StatusDotIcon({
   tone = 'enabled',
   ...props
-}: IconProps & { tone?: 'enabled' | 'disabled' | 'warning' | 'error' }) {
+}: IconProps & {
+  tone?: 'enabled' | 'disabled' | 'warning' | 'error' | 'running' | 'queued' | 'succeeded';
+}) {
   const color =
     tone === 'enabled'
       ? '#df7412'
@@ -223,7 +241,13 @@ export function StatusDotIcon({
         ? '#ffb786'
         : tone === 'error'
           ? '#ffb4ab'
-          : '#8c909f';
+          : tone === 'running'
+            ? '#60a5fa'
+            : tone === 'succeeded'
+              ? '#22c55e'
+              : tone === 'queued'
+                ? '#8c909f'
+                : '#8c909f';
   return (
     <svg {...base} {...props} fill={color} stroke="none">
       <circle cx="12" cy="12" r="4" />
