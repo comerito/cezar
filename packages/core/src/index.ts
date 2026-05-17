@@ -129,9 +129,16 @@ export {
   type EffectCall,
   type EffectContext,
   type EffectName,
+  type AcceptanceMode,
+  type AutoConfidenceConfig,
+  type HitlConfidenceConfig,
+  type ConfidenceConfig,
+  type DeferredEffect,
+  type DeferSink,
   type TriagePassOptions,
   type TriagePassActionResult,
   type TriagePassResult,
+  type TriagePassDeferSink,
   type BuildAutoCommentArgs,
 } from './actions-v2/index.js';
 

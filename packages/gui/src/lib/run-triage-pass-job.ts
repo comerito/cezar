@@ -1,6 +1,12 @@
 import { randomUUID } from 'node:crypto';
 import type { SupabaseClient } from '@supabase/supabase-js';
-import type { ActionTarget, AgentRunRecord, GitHubService, TriagePassActionResult } from '@cezar/core';
+import type {
+  ActionTarget,
+  AgentRunRecord,
+  GitHubService,
+  TriagePassActionResult,
+  TriagePassDeferSink,
+} from '@cezar/core';
 import type { WorkflowRunPersister } from './persist-workflow-run';
 import type { Database } from './supabase/types';
 
@@ -12,6 +18,9 @@ export interface RunTriagePassJobParams {
   persister: WorkflowRunPersister;
   /** Free-form label describing what initiated the pass (e.g. `'on-issue-opened'`). */
   trigger?: string;
+  /** Optional sink — receives effects deferred to human review. When omitted
+   *  the runner drops them (see docs/REFACTOR-PLAN-inbox-and-acceptance.md). */
+  deferSink?: TriagePassDeferSink;
 }
 
 export interface RunTriagePassJobResult {
@@ -41,7 +50,7 @@ export interface RunTriagePassJobResult {
  */
 export async function runTriagePassJob(params: RunTriagePassJobParams): Promise<RunTriagePassJobResult> {
   const core = await import('@cezar/core');
-  const { issueNumber, github, supabase, persister, workspaceId, trigger } = params;
+  const { issueNumber, github, supabase, persister, workspaceId, trigger, deferSink } = params;
 
   const { data: workspaceRow } = await supabase
     .from('workspaces')
@@ -81,6 +90,7 @@ export async function runTriagePassJob(params: RunTriagePassJobParams): Promise<
         enabled: autoCommentEnabled,
         triggeredBy: `cron · ${trigger ?? 'on-issue-opened'}`,
       },
+      deferSink,
     });
   } catch (err) {
     const message = err instanceof Error ? err.message : String(err);

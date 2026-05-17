@@ -1,10 +1,16 @@
 import type Anthropic from '@anthropic-ai/sdk';
 import type { GitHubService } from '../services/github.service.js';
 import { discoverBuiltinSkills, type Skill } from '../skills/skill-catalog.js';
-import type { ActionTrigger } from './action.js';
+import type { ActionDef, ActionTrigger } from './action.js';
 import type { EffectCall, EffectContext } from './effects.js';
 import { listEnabledActions, loadAutoTriageAction } from './loader.js';
-import { runAction, type ActionTarget } from './runner.js';
+import { runAction, type ActionTarget, type DeferredEffect } from './runner.js';
+
+/** Per-action context handed to a triage-pass deferSink so the caller has
+ *  everything it needs to write a `pending_decisions` row. */
+export type TriagePassDeferSink = (
+  item: DeferredEffect & { action: ActionDef; target: ActionTarget },
+) => Promise<void>;
 
 export interface TriagePassOptions {
   workspaceId: string;
@@ -22,6 +28,9 @@ export interface TriagePassOptions {
   /** Forwarded to every `runAction` call in the pass. The same `triggeredBy`
    *  label is reused for each action so the audit footer reads consistently. */
   autoComment?: { enabled: boolean; triggeredBy?: string };
+  /** Receives every effect that the runner deferred to human review. Wired
+   *  by the GUI dispatch layer to insert into `pending_decisions`. */
+  deferSink?: TriagePassDeferSink;
 }
 
 /** Per-action result from a triage pass. */
@@ -79,12 +88,18 @@ export async function runTriagePass(opts: TriagePassOptions): Promise<TriagePass
   let outputTokens = 0;
 
   for (const action of ordered) {
+    // Wrap the caller's sink to capture per-action context the GUI needs.
+    const innerDeferSink = opts.deferSink
+      ? async (item: DeferredEffect) =>
+          opts.deferSink!({ ...item, action, target: opts.target })
+      : undefined;
     try {
       const res = await runAction(action, opts.target, {
         skills,
         anthropic: opts.anthropic,
         effectCtx,
         autoComment: opts.autoComment,
+        deferSink: innerDeferSink,
       });
       results.push({
         actionName: action.name,

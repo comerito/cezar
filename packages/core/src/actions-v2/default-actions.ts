@@ -36,7 +36,7 @@ export const DEFAULT_ACTIONS: ActionDef[] = [
     kind: 'built-in',
     description: 'Classify an issue as bug / feature / question / other using a confidence-calibrated rubric.',
     systemPrompt:
-      'Classify the issue using the bug-classification playbook in your reference skills. Output a structured classification: a category, a confidence between 0 and 1, and one short sentence citing the signal you relied on. When confident this is a bug, add the bug label.',
+      'Classify the issue using the bug-classification playbook in your reference skills. Output a structured classification: a category, a confidence between 0 and 1, and one short sentence citing the signal you relied on. When confident this is a bug, add the bug label. When emitting effects, include a `confidence` integer 0..100 on each effect reflecting how certain you are that this specific effect should fire. Calibrate: use >=90 only when the evidence is unambiguous (explicit error / stack trace / reproducer); 60-89 for plausible but contestable; below 60 means do not emit the effect at all.',
     skillRefs: ['bug-classification'],
     target: 'issue',
     triggers: ['on-issue-opened', 'on-issue-edited', 'manual'],
@@ -59,7 +59,7 @@ export const DEFAULT_ACTIONS: ActionDef[] = [
     kind: 'built-in',
     description: 'Assign an impact-and-urgency priority level (critical / high / medium / low) with cited signals.',
     systemPrompt:
-      'Pick exactly one priority level per the priority-rubric playbook in your reference skills. Cite specific evidence from the issue body — not generic claims. Apply the priority via set-priority.',
+      'Pick exactly one priority level per the priority-rubric playbook in your reference skills. Cite specific evidence from the issue body — not generic claims. Apply the priority via set-priority. When emitting effects, include a `confidence` integer 0..100 reflecting how certain you are this priority should fire. Calibrate: use >=90 only when the signals are unambiguous (production outage, data loss, security CVE — i.e. clear critical/low cases); 60-89 for plausible but contestable judgement calls; below 60 means do not emit the effect.',
     skillRefs: ['priority-rubric'],
     target: 'issue',
     triggers: ['on-issue-opened', 'manual'],
@@ -82,7 +82,7 @@ export const DEFAULT_ACTIONS: ActionDef[] = [
     kind: 'built-in',
     description: 'Detect duplicate issues against an open-issue knowledge base; minimum confidence 0.80.',
     systemPrompt:
-      'Apply the dedupe-heuristics playbook in your reference skills. Only flag matches at confidence ≥ 0.80. Use the link-duplicate effect to mark the duplicate; do NOT call close (a human reviewer decides).',
+      'Apply the dedupe-heuristics playbook in your reference skills. Only flag matches at confidence ≥ 0.80. Use the link-duplicate effect to mark the duplicate; do NOT call close (a human reviewer decides). Whenever you call an effect tool, include `_confidence` (integer 0-100) as a tool argument. Calibrate: use >=90 only when the match is unambiguous (near-identical title and body, same stack trace, same reproducer); 60-89 for plausible-but-contestable matches that deserve human review; below 60 means do not call the tool at all.',
     skillRefs: ['dedupe-heuristics'],
     target: 'issue',
     triggers: ['on-issue-opened', 'manual'],
@@ -97,7 +97,7 @@ export const DEFAULT_ACTIONS: ActionDef[] = [
     kind: 'built-in',
     description: 'Apply repo-defined labels based on content. Never invents new labels.',
     systemPrompt:
-      "Apply the auto-labeling-rubric playbook in your reference skills. ONLY use labels from the repository's existing label set passed in the context. Add labels via label.add; remove obviously wrong labels via label.remove.",
+      "Apply the auto-labeling-rubric playbook in your reference skills. ONLY use labels from the repository's existing label set passed in the context. Add labels via label.add; remove obviously wrong labels via label.remove. Whenever you call an effect tool, include `_confidence` (integer 0-100) as a tool argument reflecting how certain you are that this specific label change should fire. Calibrate: use >=90 only when the match is unambiguous (dictionary-clear topic word, explicit area name in the title); 60-89 for plausible but contestable label calls; below 60 means do not call the tool.",
     skillRefs: ['auto-labeling-rubric'],
     target: 'issue',
     triggers: ['on-issue-opened', 'on-issue-edited', 'manual'],

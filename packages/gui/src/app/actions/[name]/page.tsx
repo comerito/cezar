@@ -3,6 +3,13 @@ import { notFound } from 'next/navigation';
 import { getActiveWorkspace } from '@/lib/workspace';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { ActionDetailView, type ActionDetail } from './action-detail-view';
+import {
+  coerceConfidenceConfig,
+  DEFAULT_ACCEPTANCE_MODE,
+  DEFAULT_MODEL,
+  isAcceptanceMode,
+  isActionModel,
+} from './acceptance-types';
 
 interface DbActionRow {
   id: string;
@@ -19,6 +26,9 @@ interface DbActionRow {
   enabled: boolean;
   replaces_built_in: string | null;
   updated_at: string | null;
+  model: string | null;
+  acceptance_mode: string | null;
+  confidence_config: unknown;
 }
 
 interface IssueRow {
@@ -59,7 +69,7 @@ export default async function ActionDetailPage({
     supabase
       .from('actions')
       .select(
-        'id, workspace_id, name, kind, description, system_prompt, skill_refs, target, triggers, effects, output_schema, enabled, replaces_built_in, updated_at',
+        'id, workspace_id, name, kind, description, system_prompt, skill_refs, target, triggers, effects, output_schema, enabled, replaces_built_in, updated_at, model, acceptance_mode, confidence_config',
       )
       .eq('workspace_id', workspace.id)
       .eq('name', name)
@@ -85,6 +95,12 @@ export default async function ActionDetailPage({
   const builtinRow = allRows.find((r) => r.kind === 'built-in');
   const preferred = userRow ?? builtinRow ?? allRows[0];
 
+  const model = isActionModel(preferred.model) ? preferred.model : DEFAULT_MODEL;
+  const acceptanceMode = isAcceptanceMode(preferred.acceptance_mode)
+    ? preferred.acceptance_mode
+    : DEFAULT_ACCEPTANCE_MODE;
+  const confidenceConfig = coerceConfidenceConfig(preferred.confidence_config, acceptanceMode);
+
   const detail: ActionDetail = {
     id: preferred.id,
     name: preferred.name,
@@ -102,6 +118,9 @@ export default async function ActionDetailPage({
     hasBuiltinShadow: userRow !== undefined && builtinRow !== undefined,
     isAutoTriage: workspaceRow?.auto_triage_action_id === preferred.id,
     testIssues: (issueRows ?? []).map((i) => ({ number: i.number, title: i.title })),
+    model,
+    acceptanceMode,
+    confidenceConfig,
   };
 
   const isAdmin = workspace.role === 'admin';

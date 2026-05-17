@@ -7,10 +7,25 @@ import {
   EFFECT_REGISTRY,
   effectsAsAnthropicTools,
   executeEffect,
+  extractConfidence,
   type EffectCall,
   type EffectContext,
   type EffectName,
 } from './effects.js';
+
+/**
+ * The runner hands off effects flagged for human review by writing to this
+ * sink instead of executing them. Wired by the GUI dispatch layer to insert
+ * into `pending_decisions`; the CLI passes no sink (deferred effects are
+ * silently dropped, preserving CLI semantics).
+ */
+export interface DeferredEffect {
+  call: EffectCall;
+  confidence: number;
+  /** Short human-readable summary for the inbox row. */
+  summary: string;
+}
+export type DeferSink = (item: DeferredEffect) => Promise<void>;
 
 const DEFAULT_MODEL = 'claude-sonnet-4-6';
 const MAX_TOKENS = 4096;
@@ -49,6 +64,9 @@ export interface RunActionDeps {
     enabled: boolean;
     triggeredBy?: string;
   };
+  /** Sink for effects routed to human review by the action's acceptance
+   *  config. Omit to let those effects be dropped silently (CLI default). */
+  deferSink?: DeferSink;
 }
 
 /**
@@ -82,7 +100,7 @@ export async function runAction(
     .join('\n\n---\n\n');
 
   const userMessage = formatTarget(target);
-  const model = deps.model ?? DEFAULT_MODEL;
+  const model = action.model ?? deps.model ?? DEFAULT_MODEL;
 
   const result = action.effects && action.effects.length > 0
     ? await runDeclaredMode(action, target, {
@@ -91,6 +109,7 @@ export async function runAction(
         model,
         systemMessage,
         userMessage,
+        deferSink: deps.deferSink,
       })
     : await runToolUseMode(action, target, {
         client,
@@ -98,6 +117,7 @@ export async function runAction(
         model,
         systemMessage,
         userMessage,
+        deferSink: deps.deferSink,
       });
 
   if (deps.autoComment?.enabled && !actionAlreadyCommented(result.effectsApplied)) {
@@ -139,6 +159,7 @@ interface RunMode {
   model: string;
   systemMessage: string;
   userMessage: string;
+  deferSink?: DeferSink;
 }
 
 async function runDeclaredMode(
@@ -165,13 +186,8 @@ async function runDeclaredMode(
     // action will only ever do X, Y", and we enforce that even if the model
     // tries to expand.
     if (!effectNames.includes(call.effect)) continue;
-    try {
-      const summary = await executeEffect(call, mode.effectCtx);
-      effectsApplied.push({ call, summary });
-    } catch (err) {
-      const message = err instanceof Error ? err.message : String(err);
-      effectsApplied.push({ call, summary: `error: ${message}` });
-    }
+    const outcome = await applyOrDefer(call, action, mode.effectCtx, mode.deferSink);
+    effectsApplied.push({ call, summary: outcome.summary });
   }
 
   return {
@@ -234,7 +250,16 @@ function parseDeclaredResponse(text: string): DeclaredResponse {
           if (!e || typeof e !== 'object') return null;
           const eo = e as Record<string, unknown>;
           if (typeof eo.effect !== 'string') return null;
-          return { effect: eo.effect as EffectName, args: eo.args ?? {} };
+          const confRaw = eo.confidence;
+          const confN = typeof confRaw === 'number' ? confRaw : Number(confRaw);
+          const confidence = Number.isFinite(confN)
+            ? Math.max(0, Math.min(100, Math.round(confN)))
+            : undefined;
+          return {
+            effect: eo.effect as EffectName,
+            args: eo.args ?? {},
+            confidence,
+          };
         })
         .filter((e): e is EffectCall => e !== null)
     : [];
@@ -247,7 +272,7 @@ function parseDeclaredResponse(text: string): DeclaredResponse {
 // ─── Tool-use mode (agent calls effects mid-run) ───────────────────────────
 
 async function runToolUseMode(
-  _action: ActionDef,
+  action: ActionDef,
   _target: ActionTarget,
   mode: RunMode,
 ): Promise<ActionRunResult> {
@@ -295,21 +320,19 @@ async function runToolUseMode(
     const resultBlocks: ContentBlock[] = [];
     for (const block of toolUses) {
       const tu = block as { id: string; name: string; input: unknown };
-      const call: EffectCall = { effect: tu.name as EffectName, args: tu.input ?? {} };
-      let summary: string;
-      let isError = false;
-      try {
-        summary = await executeEffect(call, mode.effectCtx);
-      } catch (err) {
-        summary = err instanceof Error ? err.message : String(err);
-        isError = true;
-      }
-      effectsApplied.push({ call, summary });
+      const { args, confidence } = extractConfidence(tu.input ?? {});
+      const call: EffectCall = {
+        effect: tu.name as EffectName,
+        args,
+        confidence,
+      };
+      const outcome = await applyOrDefer(call, action, mode.effectCtx, mode.deferSink);
+      effectsApplied.push({ call, summary: outcome.summary });
       resultBlocks.push({
         type: 'tool_result',
         tool_use_id: tu.id,
-        content: summary,
-        is_error: isError,
+        content: outcome.summary,
+        is_error: outcome.outcome === 'error',
       });
     }
     messages.push({ role: 'user', content: resultBlocks });
@@ -319,6 +342,61 @@ async function runToolUseMode(
     text: finalText,
     effectsApplied,
     usage,
+  };
+}
+
+// ─── Acceptance routing ────────────────────────────────────────────────────
+
+/**
+ * Per-effect routing chokepoint. Reads the action's acceptance_mode +
+ * confidence_config and either applies the effect, defers it to the human
+ * inbox via `deferSink`, or drops it silently.
+ *
+ *   auto mode             → ≥ autoAcceptAbove : apply,  < : drop
+ *   human-in-the-loop     → ≥ autoAcceptAbove : apply,
+ *                           ≥ autoDenyBelow   : defer,
+ *                           <                 : drop
+ *
+ * When no confidence is provided on the call, treats it as 100 (fully
+ * confident) so existing actions that don't emit confidence keep applying
+ * everything. See docs/REFACTOR-PLAN-inbox-and-acceptance.md §7.
+ */
+async function applyOrDefer(
+  call: EffectCall,
+  action: ActionDef,
+  ctx: EffectContext,
+  deferSink: DeferSink | undefined,
+): Promise<{ outcome: 'applied' | 'deferred' | 'dropped' | 'error'; summary: string }> {
+  const confidence = call.confidence ?? 100;
+  const mode = action.acceptanceMode ?? 'auto';
+  const cfg = action.confidenceConfig ?? { autoAcceptAbove: 0 };
+  const acceptAbove = cfg.autoAcceptAbove;
+  const denyBelow = 'autoDenyBelow' in cfg ? cfg.autoDenyBelow : 0;
+
+  if (confidence >= acceptAbove) {
+    try {
+      const summary = await executeEffect(call, ctx);
+      return { outcome: 'applied', summary };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { outcome: 'error', summary: `error: ${message}` };
+    }
+  }
+
+  if (mode === 'human-in-the-loop' && confidence >= denyBelow && deferSink) {
+    try {
+      const summary = `deferred to inbox (${call.effect} @ ${confidence}%)`;
+      await deferSink({ call, confidence, summary });
+      return { outcome: 'deferred', summary };
+    } catch (err) {
+      const message = err instanceof Error ? err.message : String(err);
+      return { outcome: 'error', summary: `defer failed: ${message}` };
+    }
+  }
+
+  return {
+    outcome: 'dropped',
+    summary: `dropped (${call.effect} @ ${confidence}% < threshold)`,
   };
 }
 

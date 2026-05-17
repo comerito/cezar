@@ -156,6 +156,10 @@ export const ALL_EFFECT_NAMES = Object.keys(EFFECT_REGISTRY) as EffectName[];
 export interface EffectCall<N extends EffectName = EffectName> {
   effect: N;
   args: unknown;
+  /** Model-self-reported confidence in 0..100. Optional; absent ≡ 100 (fully
+   *  confident). Used by the runner to route effects when the producing
+   *  action's `acceptanceMode='human-in-the-loop'`. */
+  confidence?: number;
 }
 
 /**
@@ -184,12 +188,57 @@ export async function executeEffect(
 export function effectsAsAnthropicTools(allowed: readonly EffectName[] = ALL_EFFECT_NAMES) {
   return allowed.map((name) => {
     const def = EFFECT_REGISTRY[name];
+    // Inject an optional `_confidence` parameter into every tool's schema so
+    // the model can self-report confidence on each effect call. The runner
+    // strips it from args before validating against the Zod schema. Keeping
+    // confidence out of the Zod schemas avoids polluting every effect's
+    // typed signature with HITL plumbing.
+    const base = zodToInputSchema(def.schema as z.ZodType<unknown>) as {
+      properties?: Record<string, unknown>;
+      [k: string]: unknown;
+    };
     return {
       name,
-      description: def.description,
-      input_schema: zodToInputSchema(def.schema as z.ZodType<unknown>),
+      description:
+        def.description +
+        ' Include `_confidence` (0-100 integer) reflecting how certain you are this effect should fire; omit if unsure.',
+      input_schema: {
+        ...base,
+        properties: {
+          ...(base.properties ?? {}),
+          _confidence: {
+            type: 'integer',
+            minimum: 0,
+            maximum: 100,
+            description:
+              'Self-reported confidence (0-100) that this effect should fire. Used by Cezar for human-in-the-loop routing.',
+          },
+        },
+      },
     };
   });
+}
+
+/**
+ * Pull the optional `_confidence` field out of a tool-use args object,
+ * returning the remaining args and the extracted confidence (if present
+ * and well-formed). Args are returned unchanged when no `_confidence`
+ * is present.
+ */
+export function extractConfidence(rawArgs: unknown): {
+  args: unknown;
+  confidence?: number;
+} {
+  if (!rawArgs || typeof rawArgs !== 'object' || Array.isArray(rawArgs)) {
+    return { args: rawArgs };
+  }
+  const obj = rawArgs as Record<string, unknown>;
+  if (!('_confidence' in obj)) return { args: rawArgs };
+  const raw = obj._confidence;
+  const { _confidence: _, ...rest } = obj;
+  const n = typeof raw === 'number' ? raw : Number(raw);
+  if (!Number.isFinite(n)) return { args: rest };
+  return { args: rest, confidence: Math.max(0, Math.min(100, Math.round(n))) };
 }
 
 /**

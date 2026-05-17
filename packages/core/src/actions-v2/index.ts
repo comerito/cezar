@@ -2,8 +2,21 @@
  * Public entry point for the data-driven action runtime. Imported via
  * `@cezar/core` once exported from the package root in src/index.ts.
  */
-export type { ActionDef, ActionTrigger, ActionRunResult } from './action.js';
-export type { ActionTarget, RunActionDeps } from './runner.js';
+export type {
+  ActionDef,
+  ActionTrigger,
+  ActionRunResult,
+  AcceptanceMode,
+  AutoConfidenceConfig,
+  HitlConfidenceConfig,
+  ConfidenceConfig,
+} from './action.js';
+export type {
+  ActionTarget,
+  RunActionDeps,
+  DeferredEffect,
+  DeferSink,
+} from './runner.js';
 export { runAction } from './runner.js';
 export {
   buildAutoCommentBody,
@@ -27,4 +40,5 @@ export {
   type TriagePassOptions,
   type TriagePassActionResult,
   type TriagePassResult,
+  type TriagePassDeferSink,
 } from './triage-pass.js';

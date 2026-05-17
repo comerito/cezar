@@ -21,6 +21,12 @@ import {
   type ActionPayload,
   type SkillSuggestion,
 } from './action-mutations';
+import { AcceptanceSection } from './acceptance-section';
+import type {
+  AcceptanceMode,
+  ActionModel,
+  ConfidenceConfig,
+} from './acceptance-types';
 
 export interface ActionDetail {
   id: string;
@@ -42,6 +48,9 @@ export interface ActionDetail {
   hasBuiltinShadow: boolean;
   isAutoTriage: boolean;
   testIssues: Array<{ number: number; title: string }>;
+  model: ActionModel;
+  acceptanceMode: AcceptanceMode;
+  confidenceConfig: ConfidenceConfig;
 }
 
 interface Props {
@@ -90,6 +99,9 @@ export function ActionDetailView({ action, readOnly }: Props) {
   const [outputSchema, setOutputSchema] = useState(action.outputSchema);
   const [enabled, setEnabled] = useState(action.enabled);
   const [systemPrompt, setSystemPrompt] = useState(action.systemPrompt);
+  const [model, setModel] = useState<ActionModel>(action.model);
+  const [acceptanceMode, setAcceptanceMode] = useState<AcceptanceMode>(action.acceptanceMode);
+  const [confidenceConfig, setConfidenceConfig] = useState<ConfidenceConfig>(action.confidenceConfig);
   const [promptDirty, setPromptDirty] = useState(false);
   const [metaDirty, setMetaDirty] = useState(false);
   const [saveState, setSaveState] = useState<SaveState>('idle');
@@ -117,6 +129,9 @@ export function ActionDetailView({ action, readOnly }: Props) {
     setOutputSchema(action.outputSchema);
     setEnabled(action.enabled);
     setSystemPrompt(action.systemPrompt);
+    setModel(action.model);
+    setAcceptanceMode(action.acceptanceMode);
+    setConfidenceConfig(action.confidenceConfig);
     setPromptDirty(false);
     setMetaDirty(false);
     setSaveState('idle');
@@ -133,6 +148,9 @@ export function ActionDetailView({ action, readOnly }: Props) {
     action.enabled,
     action.systemPrompt,
     action.isAutoTriage,
+    action.model,
+    action.acceptanceMode,
+    action.confidenceConfig,
   ]);
 
   // Lazy skill suggestion fetch — only when the user opens the autocomplete.
@@ -180,8 +198,23 @@ export function ActionDetailView({ action, readOnly }: Props) {
       triggers: Array.from(triggers),
       effects: effectsMode === 'declared' ? Array.from(declaredEffects) : null,
       outputSchema: effectsMode === 'declared' ? outputSchema : '',
+      model,
+      acceptanceMode,
+      confidenceConfig,
     }),
-    [description, systemPrompt, skillRefs, target, triggers, effectsMode, declaredEffects, outputSchema],
+    [
+      description,
+      systemPrompt,
+      skillRefs,
+      target,
+      triggers,
+      effectsMode,
+      declaredEffects,
+      outputSchema,
+      model,
+      acceptanceMode,
+      confidenceConfig,
+    ],
   );
 
   async function handleSave() {
@@ -210,6 +243,9 @@ export function ActionDetailView({ action, readOnly }: Props) {
     setOutputSchema(action.outputSchema);
     setEnabled(action.enabled);
     setSystemPrompt(action.systemPrompt);
+    setModel(action.model);
+    setAcceptanceMode(action.acceptanceMode);
+    setConfidenceConfig(action.confidenceConfig);
     setPromptDirty(false);
     setMetaDirty(false);
   }
@@ -650,6 +686,19 @@ export function ActionDetailView({ action, readOnly }: Props) {
           </div>
         </section>
       </div>
+
+      <AcceptanceSection
+        model={model}
+        acceptanceMode={acceptanceMode}
+        confidenceConfig={confidenceConfig}
+        readOnly={readOnly}
+        onChange={(next) => {
+          setModel(next.model);
+          setAcceptanceMode(next.acceptanceMode);
+          setConfidenceConfig(next.confidenceConfig);
+          setMetaDirty(true);
+        }}
+      />
 
       <SkillRefsPreview refs={skillRefs} bodies={skillBodies} setBodies={setSkillBodies} />
 

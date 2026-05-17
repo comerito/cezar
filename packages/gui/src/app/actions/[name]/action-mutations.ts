@@ -4,6 +4,14 @@ import { revalidatePath } from 'next/cache';
 import { getSessionUser } from '@/lib/auth';
 import { getActiveWorkspace } from '@/lib/workspace';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
+import {
+  isAcceptanceMode,
+  isActionModel,
+  validateConfidenceConfig,
+  type AcceptanceMode,
+  type ActionModel,
+  type ConfidenceConfig,
+} from './acceptance-types';
 
 export interface ActionPayload {
   description: string | null;
@@ -15,6 +23,9 @@ export interface ActionPayload {
   effects: string[] | null;
   /** JSON-encoded schema; empty string clears the field. */
   outputSchema: string;
+  model: ActionModel;
+  acceptanceMode: AcceptanceMode;
+  confidenceConfig: ConfidenceConfig;
 }
 
 export interface SaveActionResult {
@@ -95,6 +106,11 @@ export async function saveAction(
   const schemaParse = parseOutputSchema(payload.outputSchema);
   if (!schemaParse.ok) return { ok: false, error: schemaParse.error };
 
+  if (!isActionModel(payload.model)) return { ok: false, error: 'Unknown model' };
+  if (!isAcceptanceMode(payload.acceptanceMode)) return { ok: false, error: 'Unknown acceptance mode' };
+  const confidenceParse = validateConfidenceConfig(payload.acceptanceMode, payload.confidenceConfig);
+  if (!confidenceParse.ok) return { ok: false, error: confidenceParse.error };
+
   const supabase = createSupabaseAdminClient();
   const current = await loadCurrentRows(workspace.id, name);
 
@@ -108,6 +124,9 @@ export async function saveAction(
     output_schema: schemaParse.value,
     enabled: options.enable ?? true,
     updated_by: user.id,
+    model: payload.model,
+    acceptance_mode: payload.acceptanceMode,
+    confidence_config: confidenceParse.value,
   };
 
   if (current.user) {
@@ -177,7 +196,7 @@ export async function autosaveActionPrompt(
   const { data: source, error: sourceErr } = await supabase
     .from('actions')
     .select(
-      'description, skill_refs, target, triggers, effects, output_schema, enabled',
+      'description, skill_refs, target, triggers, effects, output_schema, enabled, model, acceptance_mode, confidence_config',
     )
     .eq('id', current.builtin.id)
     .single();
@@ -200,6 +219,9 @@ export async function autosaveActionPrompt(
       effects: source.effects,
       output_schema: source.output_schema,
       enabled: source.enabled,
+      model: source.model,
+      acceptance_mode: source.acceptance_mode,
+      confidence_config: source.confidence_config,
       created_by: user.id,
       updated_by: user.id,
     })
@@ -243,7 +265,7 @@ export async function setActionEnabled(
   const { data: source, error: sourceErr } = await supabase
     .from('actions')
     .select(
-      'description, system_prompt, skill_refs, target, triggers, effects, output_schema',
+      'description, system_prompt, skill_refs, target, triggers, effects, output_schema, model, acceptance_mode, confidence_config',
     )
     .eq('id', current.builtin.id)
     .single();
@@ -266,6 +288,9 @@ export async function setActionEnabled(
       effects: source.effects,
       output_schema: source.output_schema,
       enabled,
+      model: source.model,
+      acceptance_mode: source.acceptance_mode,
+      confidence_config: source.confidence_config,
       created_by: user.id,
       updated_by: user.id,
     })
@@ -332,6 +357,9 @@ interface SourceActionFields {
   triggers: unknown;
   effects: unknown;
   output_schema: unknown;
+  model: string;
+  acceptance_mode: string;
+  confidence_config: unknown;
 }
 
 /**
@@ -355,7 +383,7 @@ export async function overrideBuiltInAction(
 
   const { data: source, error: sourceErr } = await supabase
     .from('actions')
-    .select('description, system_prompt, skill_refs, target, triggers, effects, output_schema')
+    .select('description, system_prompt, skill_refs, target, triggers, effects, output_schema, model, acceptance_mode, confidence_config')
     .eq('id', current.builtin.id)
     .single<SourceActionFields>();
   if (sourceErr || !source) {
@@ -377,6 +405,9 @@ export async function overrideBuiltInAction(
       effects: source.effects as never,
       output_schema: source.output_schema as never,
       enabled: true,
+      model: source.model,
+      acceptance_mode: source.acceptance_mode,
+      confidence_config: source.confidence_config as never,
       created_by: user.id,
       updated_by: user.id,
     })
@@ -427,7 +458,7 @@ export async function duplicateAction(name: string): Promise<SaveActionResult & 
 
   const { data: source, error: sourceErr } = await supabase
     .from('actions')
-    .select('description, system_prompt, skill_refs, target, triggers, effects, output_schema')
+    .select('description, system_prompt, skill_refs, target, triggers, effects, output_schema, model, acceptance_mode, confidence_config')
     .eq('id', sourceRow.id)
     .single<SourceActionFields>();
   if (sourceErr || !source) {
@@ -467,6 +498,9 @@ export async function duplicateAction(name: string): Promise<SaveActionResult & 
       effects: source.effects as never,
       output_schema: source.output_schema as never,
       enabled: true,
+      model: source.model,
+      acceptance_mode: source.acceptance_mode,
+      confidence_config: source.confidence_config as never,
       created_by: user.id,
       updated_by: user.id,
     });

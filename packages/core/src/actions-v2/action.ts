@@ -29,7 +29,29 @@ export interface ActionDef {
   effects: EffectName[] | null;
   outputSchema: Record<string, unknown> | null;
   enabled: boolean;
+  /** LLM model the runner uses. Falls back to runner default when null. */
+  model?: string | null;
+  /** Acceptance routing — see docs/REFACTOR-PLAN-inbox-and-acceptance.md.
+   *  Defaults to 'auto' (apply every effect regardless of confidence). */
+  acceptanceMode?: AcceptanceMode;
+  /** Thresholds the runner uses to route per-effect confidence. */
+  confidenceConfig?: ConfidenceConfig;
 }
+
+export type AcceptanceMode = 'auto' | 'human-in-the-loop';
+
+/** Auto mode: ≥ autoAcceptAbove → apply; < → drop. */
+export interface AutoConfidenceConfig {
+  autoAcceptAbove: number;
+}
+
+/** HITL mode: ≥ autoAcceptAbove → apply; in band → defer to inbox; < autoDenyBelow → drop. */
+export interface HitlConfidenceConfig {
+  autoAcceptAbove: number;
+  autoDenyBelow: number;
+}
+
+export type ConfidenceConfig = AutoConfidenceConfig | HitlConfidenceConfig;
 
 export type ActionTrigger =
   | 'manual'

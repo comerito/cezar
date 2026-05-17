@@ -1,4 +1,9 @@
-import type { ActionDef, ActionTrigger } from './action.js';
+import type {
+  AcceptanceMode,
+  ActionDef,
+  ActionTrigger,
+  ConfidenceConfig,
+} from './action.js';
 import type { EffectName } from './effects.js';
 
 /**
@@ -19,10 +24,13 @@ interface ActionRow {
   effects: unknown;
   output_schema: unknown;
   enabled: boolean;
+  model: string | null;
+  acceptance_mode: string | null;
+  confidence_config: unknown;
 }
 
 const ACTION_COLUMNS =
-  'id, workspace_id, name, kind, description, system_prompt, skill_refs, target, triggers, effects, output_schema, enabled';
+  'id, workspace_id, name, kind, description, system_prompt, skill_refs, target, triggers, effects, output_schema, enabled, model, acceptance_mode, confidence_config';
 
 interface QueryResult<T> {
   data: T | null;
@@ -75,7 +83,33 @@ function rowToAction(row: ActionRow): ActionDef {
         ? (row.output_schema as Record<string, unknown>)
         : null,
     enabled: row.enabled,
+    model: row.model,
+    acceptanceMode: parseAcceptanceMode(row.acceptance_mode),
+    confidenceConfig: parseConfidenceConfig(row.confidence_config),
   };
+}
+
+function parseAcceptanceMode(value: string | null): AcceptanceMode {
+  return value === 'human-in-the-loop' ? 'human-in-the-loop' : 'auto';
+}
+
+function parseConfidenceConfig(value: unknown): ConfidenceConfig {
+  const obj = value && typeof value === 'object' && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : {};
+  const clamp = (v: unknown, fallback: number): number => {
+    const n = typeof v === 'number' ? v : Number(v);
+    if (!Number.isFinite(n)) return fallback;
+    return Math.max(0, Math.min(100, Math.round(n)));
+  };
+  const high = clamp(obj.autoAcceptAbove, 0);
+  if ('autoDenyBelow' in obj) {
+    return {
+      autoAcceptAbove: high,
+      autoDenyBelow: Math.min(clamp(obj.autoDenyBelow, 0), high - 1),
+    };
+  }
+  return { autoAcceptAbove: high };
 }
 
 /**

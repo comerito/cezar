@@ -182,12 +182,36 @@ export async function executeWorkflowJob(
       // intentionally not wired here — the new actions emit labels via
       // effects, not a structured `route` outcome; a routing action that
       // produces that signal is the next deliverable.
+      // Capture persister.id locally so the deferSink closure has a
+      // narrowed non-null string regardless of the enclosing `persister`
+      // variable's nullable type.
+      const workflowRunId = persister.id;
       const triageResult = await runTriagePassJob({
         workspaceId,
         issueNumber: runIssueNumber,
         github,
         supabase: adminSupabase,
         persister,
+        deferSink: async ({ call, confidence, summary, action, target }) => {
+          // Write the deferred effect to pending_decisions for the inbox.
+          // See docs/REFACTOR-PLAN-inbox-and-acceptance.md §7.
+          const { error } = await adminSupabase.from('pending_decisions').insert({
+            workspace_id: workspaceId,
+            action_id: action.id,
+            workflow_run_id: workflowRunId,
+            target_kind: target.kind,
+            issue_number: target.kind === 'issue' ? target.number : null,
+            pr_number: target.kind === 'pr' ? target.number : null,
+            target_title: target.title,
+            effect: call.effect,
+            effect_args: (call.args ?? {}) as Database['public']['Tables']['pending_decisions']['Insert']['effect_args'],
+            summary,
+            confidence,
+          });
+          if (error) {
+            console.error('[dispatch] pending_decisions insert failed:', error.message);
+          }
+        },
       });
       outcomeJson = triageResult.outcome;
       runStatus = triageResult.status as RunStatus;

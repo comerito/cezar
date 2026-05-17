@@ -214,11 +214,14 @@ export interface Database {
           updated_at: string;
           created_by: string | null;
           updated_by: string | null;
+          model: string;
+          acceptance_mode: 'auto' | 'human-in-the-loop';
+          confidence_config: Json;
         };
         Insert: Omit<Database['public']['Tables']['actions']['Row'],
           'id' | 'kind' | 'description' | 'system_prompt' | 'skill_refs' | 'triggers' |
           'effects' | 'output_schema' | 'enabled' | 'replaces_built_in' | 'created_at' | 'updated_at' |
-          'created_by' | 'updated_by'
+          'created_by' | 'updated_by' | 'model' | 'acceptance_mode' | 'confidence_config'
         > & {
           id?: string;
           kind?: 'built-in' | 'user';
@@ -234,6 +237,9 @@ export interface Database {
           updated_at?: string;
           created_by?: string | null;
           updated_by?: string | null;
+          model?: string;
+          acceptance_mode?: 'auto' | 'human-in-the-loop';
+          confidence_config?: Json;
         };
         Update: Partial<Database['public']['Tables']['actions']['Insert']>;
       };
@@ -442,6 +448,53 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database['public']['Tables']['runners']['Insert']>;
+      };
+      pending_decisions: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          action_id: string;
+          workflow_run_id: string | null;
+          agent_run_id: string | null;
+          target_kind: 'issue' | 'pr';
+          issue_number: number | null;
+          pr_number: number | null;
+          target_title: string;
+          effect: string;
+          effect_args: Json;
+          summary: string;
+          confidence: number;
+          status: 'pending' | 'accepted' | 'dismissed' | 'expired';
+          created_at: string;
+          decided_at: string | null;
+          decided_by: string | null;
+          decided_reason: string | null;
+          apply_error: string | null;
+          expires_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          action_id: string;
+          workflow_run_id?: string | null;
+          agent_run_id?: string | null;
+          target_kind: 'issue' | 'pr';
+          issue_number?: number | null;
+          pr_number?: number | null;
+          target_title: string;
+          effect: string;
+          effect_args?: Json;
+          summary: string;
+          confidence: number;
+          status?: 'pending' | 'accepted' | 'dismissed' | 'expired';
+          created_at?: string;
+          decided_at?: string | null;
+          decided_by?: string | null;
+          decided_reason?: string | null;
+          apply_error?: string | null;
+          expires_at?: string | null;
+        };
+        Update: Partial<Database['public']['Tables']['pending_decisions']['Insert']>;
       };
     };
   };
