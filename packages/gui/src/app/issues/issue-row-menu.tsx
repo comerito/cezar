@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useId, useRef, useState, useTransition } from 'react';
 import { cn } from '@/components/ui/cn';
 import { MoreVerticalIcon } from '@/components/icons';
+import { RowMenuPortal } from '@/components/row-menu-portal';
 import { startAutofix } from './autofix-actions';
 import { RunActionForIssueModal } from './run-action-for-issue-modal';
 
@@ -189,20 +190,17 @@ export function IssueRowMenu({
       >
         <MoreVerticalIcon className="h-4 w-4" />
       </button>
-      {open && (
-        <div
-          ref={popoverRef}
-          id={menuId}
-          role="menu"
-          aria-label={`Issue #${issueNumber} actions menu`}
-          onKeyDown={handleMenuKey}
-          className={cn(
-            'absolute right-2 z-30 mt-1 w-56 origin-top-right rounded-md border border-outline-variant bg-surface-container-high py-1 shadow-ambient',
-          )}
-        >
-          {rendered}
-        </div>
-      )}
+      <RowMenuPortal
+        open={open}
+        triggerRef={triggerRef}
+        popoverRef={popoverRef}
+        onClose={() => setOpen(false)}
+        id={menuId}
+        ariaLabel={`Issue #${issueNumber} actions menu`}
+        onKeyDown={handleMenuKey}
+      >
+        {rendered}
+      </RowMenuPortal>
       {runActionOpen && (
         <RunActionForIssueModal
           issueNumber={issueNumber}

@@ -4,6 +4,7 @@ import { useCallback, useEffect, useId, useRef, useState, useTransition } from '
 import { useRouter } from 'next/navigation';
 import { cn } from '@/components/ui/cn';
 import { MoreVerticalIcon } from '@/components/icons';
+import { RowMenuPortal } from '@/components/row-menu-portal';
 import {
   clearAutoTriage,
   deleteAction,
@@ -275,20 +276,17 @@ export function ActionRowMenu({
       >
         <MoreVerticalIcon className="h-4 w-4" />
       </button>
-      {open && (
-        <div
-          ref={popoverRef}
-          id={menuId}
-          role="menu"
-          aria-label={`${name} actions menu`}
-          onKeyDown={handleMenuKey}
-          className={cn(
-            'absolute right-2 z-30 mt-1 w-56 origin-top-right rounded-md border border-outline-variant bg-surface-container-high py-1 shadow-ambient',
-          )}
-        >
-          {rendered}
-        </div>
-      )}
+      <RowMenuPortal
+        open={open}
+        triggerRef={triggerRef}
+        popoverRef={popoverRef}
+        onClose={() => setOpen(false)}
+        id={menuId}
+        ariaLabel={`${name} actions menu`}
+        onKeyDown={handleMenuKey}
+      >
+        {rendered}
+      </RowMenuPortal>
       {runNowOpen && (
         <RunNowModal
           actionId={id}

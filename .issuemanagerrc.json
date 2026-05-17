@@ -9,6 +9,7 @@
     "tokenBudgetPerAttempt": 7500000,
     "maxAttemptsPerIssue": 10,
     "retryOnReviewFailure": true,
+    "workflow.useEngine": true,
     "baseBranch": "develop",
     "minAnalyzerConfidence": 0.5,
     "models": {
