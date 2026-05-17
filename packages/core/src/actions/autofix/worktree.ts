@@ -199,6 +199,59 @@ export async function commitAll(worktreePath: string, message: string): Promise<
   return runGit(worktreePath, ['rev-parse', 'HEAD']);
 }
 
+/**
+ * Periodically commit any in-progress changes in the worktree so a crashed
+ * or killed agent leaves a recoverable branch instead of losing the work.
+ * Returns a stop function that flushes one last commit before exiting.
+ *
+ * Best-effort: commit failures are swallowed (logged via `onWarn` if
+ * provided) so a transient git error mid-fixer doesn't kill the run.
+ * Idempotent: ticks that find no dirty files do nothing — no
+ * `--allow-empty` commits clutter the history.
+ *
+ * Inspired by the github-janitor pattern (see
+ * `docs/claude-subscription-runner.md` §"Periodic autosave").
+ */
+export function startWorktreeAutosaver(opts: {
+  worktreePath: string;
+  intervalMs?: number;
+  message?: string;
+  onWarn?: (m: string) => void;
+}): () => Promise<void> {
+  const intervalMs = opts.intervalMs ?? 90_000;
+  const message = opts.message ?? 'cezar: autosave';
+  let stopped = false;
+  let inFlight: Promise<unknown> | null = null;
+
+  async function tick(): Promise<void> {
+    if (stopped) return;
+    if (inFlight) return; // skip overlapping ticks
+    inFlight = commitAll(opts.worktreePath, message).catch((err: unknown) => {
+      const m = err instanceof Error ? err.message : String(err);
+      opts.onWarn?.(`autosave failed: ${m}`);
+    });
+    try {
+      await inFlight;
+    } finally {
+      inFlight = null;
+    }
+  }
+
+  const timer = setInterval(() => {
+    void tick();
+  }, intervalMs);
+  if (typeof timer.unref === 'function') timer.unref();
+
+  return async () => {
+    stopped = true;
+    clearInterval(timer);
+    // Final flush — make sure a stop right after a write doesn't leave
+    // half-second-old changes uncommitted.
+    if (inFlight) await inFlight.catch(() => {});
+    await commitAll(opts.worktreePath, message).catch(() => {});
+  };
+}
+
 export async function getDiffAgainstBase(worktreePath: string, baseRef: string): Promise<string> {
   return runGit(worktreePath, ['diff', `${baseRef}...HEAD`]);
 }

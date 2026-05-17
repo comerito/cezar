@@ -33,6 +33,10 @@ export interface AgentRunSpec<T = unknown> {
   tokenBudget?: TokenBudget;
   /** Structured-output contract owned by the step; runners extract+validate. */
   responseSchema?: z.ZodSchema<T>;
+  /** Stable session id passed to the backend so an operator can
+   *  `claude --resume <id>` later. Today only honored by
+   *  `ClaudeCodeCliRunner`; the API/SDK backend ignores it. */
+  sessionId?: string;
 }
 
 /**

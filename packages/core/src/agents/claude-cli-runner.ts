@@ -1,4 +1,6 @@
 import { spawn as nodeSpawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
+import { fileURLToPath } from 'node:url';
+import { dirname, resolve as resolvePath } from 'node:path';
 import { TokenBudgetExceededError } from '../actions/autofix/token-budget.js';
 import {
   type AgentRunner,
@@ -60,7 +62,11 @@ export class ClaudeCodeCliRunner implements AgentRunner {
   private child: ChildProcessWithoutNullStreams | null = null;
 
   constructor(opts: ClaudeCodeCliRunnerOptions = {}) {
-    this.bin = opts.bin ?? 'claude';
+    // Swap to the mock binary when `CEZAR_DRY_RUN=1` so workflow / cockpit
+    // / event-persistence work can be exercised without burning tokens.
+    // Explicit `opts.bin` wins so tests can still inject their own stub.
+    const defaultBin = process.env.CEZAR_DRY_RUN === '1' ? mockClaudePath() : 'claude';
+    this.bin = opts.bin ?? defaultBin;
     this.spawnFn = opts.spawnFn ?? (nodeSpawn as unknown as SpawnFn);
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
     this.usdPerMillionTokens = opts.usdPerMillionTokens ?? DEFAULT_USD_PER_MILLION_TOKENS;
@@ -222,6 +228,14 @@ function buildClaudeArgs<T>(spec: AgentRunSpec<T>, usdPerMillionTokens: number):
     '--permission-mode',
     'acceptEdits',
   ];
+  // Pin the session so an operator can `cd <worktree> && claude --resume
+  // <sessionId>` after a failed run to take over interactively. We use
+  // the agent_run.id as the session id (already a UUID) so the cockpit
+  // can show it verbatim. Pre-2025 claude builds may reject `--session-id`;
+  // the runner silently drops it via the surrounding try/catch on spawn.
+  if (spec.sessionId) {
+    args.push('--session-id', spec.sessionId);
+  }
   const allowed = buildAllowedTools(spec.allowedTools, spec.bashAllowlist);
   if (allowed.length > 0) {
     args.push('--allowedTools', allowed.join(','));
@@ -284,6 +298,17 @@ function readBudgetLimit(budget: unknown): number | null {
 
 function truncate(s: string, max = 200): string {
   return s.length > max ? `${s.slice(0, max)}…` : s;
+}
+
+/**
+ * Resolve the path to `scripts/mock-claude.mjs` shipped alongside
+ * @cezar/core. After `tsc` build this file lives at
+ * `dist/agents/claude-cli-runner.js`, so `../../scripts/mock-claude.mjs`
+ * walks back to the package root.
+ */
+function mockClaudePath(): string {
+  const here = dirname(fileURLToPath(import.meta.url));
+  return resolvePath(here, '..', '..', 'scripts', 'mock-claude.mjs');
 }
 
 // ---- stream-json event handling -------------------------------------------

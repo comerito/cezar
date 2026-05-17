@@ -12,7 +12,8 @@
   },
   "files": [
     "dist",
-    "skills"
+    "skills",
+    "scripts/mock-claude.mjs"
   ],
   "scripts": {
     "build": "tsc",

@@ -6,7 +6,7 @@ import type { AgentBackend, AgentEvent, AgentRunner, AgentRunSpec } from '../age
 import { createAgentRunner } from '../agents/runner-factory.js';
 import { discoverSkills, type Skill } from '../skills/skill-catalog.js';
 import { resolveStepConfig, type WorkflowBinding, type WorkspaceWorkflowSettings, DEFAULT_WORKSPACE_WORKFLOW_SETTINGS } from './binding.js';
-import { commitAll, getDiffAgainstBase } from '../actions/autofix/worktree.js';
+import { commitAll, getDiffAgainstBase, startWorktreeAutosaver } from '../actions/autofix/worktree.js';
 import { TokenBudget } from '../actions/autofix/token-budget.js';
 import { parseStructured } from '../agents/structured-output.js';
 import {
@@ -665,19 +665,41 @@ export class WorkflowEngine {
     };
 
     const runner = runnerFactory(resolved.backend);
+    const allowedTools = [...builtinTools, ...resolved.extraTools];
     const spec: AgentRunSpec<unknown> = {
       systemPrompt: resolved.systemPrompt,
       userPrompt: step.buildUserPrompt(ctxWithBudget),
       cwd: args.worktreePath ?? process.cwd(),
-      allowedTools: [...builtinTools, ...resolved.extraTools],
+      allowedTools,
       bashAllowlist,
       model: resolved.model,
       maxTurns,
       tokenBudget: budget,
       responseSchema: step.responseSchema,
+      // Use the agent_runs row id as the claude session id so an operator
+      // can `cd <worktree> && claude --resume <id>` after a failed run.
+      // Only honored by ClaudeCodeCliRunner today — see agent-runner.ts.
+      sessionId: record.id,
     };
 
-    const result = await runner.run(spec, (e) => stepCtx.emit(e));
+    // Periodic autosave for steps that can mutate the worktree (fixer-class).
+    // A crashed agent leaves a recoverable branch instead of an empty run.
+    const writeTools = new Set(['Edit', 'Write', 'NotebookEdit']);
+    const mutates = allowedTools.some((t) => writeTools.has(t));
+    const stopAutosave = mutates && args.worktreePath
+      ? startWorktreeAutosaver({
+          worktreePath: args.worktreePath,
+          message: `cezar: autosave (${step.id})`,
+          onWarn: (m) => stepCtx.emit({ type: 'note', message: m }),
+        })
+      : null;
+
+    let result: Awaited<ReturnType<typeof runner.run>>;
+    try {
+      result = await runner.run(spec, (e) => stepCtx.emit(e));
+    } finally {
+      if (stopAutosave) await stopAutosave();
+    }
     record.tokensUsed = result.tokensUsed;
     record.finishedAt = new Date().toISOString();
 
