@@ -38,6 +38,18 @@ export interface ClaudeCodeCliRunnerOptions {
   timeoutMs?: number;
   /** $/Mtoken used to derive `--max-budget-usd` from `spec.tokenBudget`. */
   usdPerMillionTokens?: number;
+  /**
+   * How the runner invokes `claude`:
+   *  - `'print'` (default, today's behavior) — `claude -p <userPrompt>`,
+   *    one turn-cycle, exit.
+   *  - `'stream-json'` — `claude --input-format stream-json
+   *    --output-format stream-json` (no `-p`); the user prompt is sent
+   *    over stdin as one `{type:user}` NDJSON line. Still one process
+   *    per `.run()` call — Phase A plumbing for the persistent-session
+   *    refactor; Phase B will reuse this transport but keep the child
+   *    alive across multiple `.run()` calls.
+   */
+  transport?: 'print' | 'stream-json';
 }
 
 /**
@@ -59,6 +71,7 @@ export class ClaudeCodeCliRunner implements AgentRunner {
   private readonly spawnFn: SpawnFn;
   private readonly timeoutMs: number;
   private readonly usdPerMillionTokens: number;
+  private readonly transport: 'print' | 'stream-json';
   private child: ChildProcessWithoutNullStreams | null = null;
 
   constructor(opts: ClaudeCodeCliRunnerOptions = {}) {
@@ -70,13 +83,14 @@ export class ClaudeCodeCliRunner implements AgentRunner {
     this.spawnFn = opts.spawnFn ?? (nodeSpawn as unknown as SpawnFn);
     this.timeoutMs = opts.timeoutMs ?? DEFAULT_RUN_TIMEOUT_MS;
     this.usdPerMillionTokens = opts.usdPerMillionTokens ?? DEFAULT_USD_PER_MILLION_TOKENS;
+    this.transport = opts.transport ?? 'print';
   }
 
   async run<T = unknown>(
     spec: AgentRunSpec<T>,
     onEvent?: (event: AgentEvent) => void,
   ): Promise<AgentRunResult<T>> {
-    const args = buildClaudeArgs(spec, this.usdPerMillionTokens);
+    const args = buildClaudeArgs(spec, this.usdPerMillionTokens, this.transport);
 
     let child: ChildProcessWithoutNullStreams;
     try {
@@ -85,6 +99,25 @@ export class ClaudeCodeCliRunner implements AgentRunner {
       throw wrapSpawnError(err, this.bin);
     }
     this.child = child;
+
+    // In stream-json transport the prompt isn't in argv — it goes over
+    // stdin as one NDJSON `{type:user, message:…}` line, then we close
+    // stdin so claude knows there's no further input and can run to
+    // completion. The session id is included so the message gets
+    // associated with the right session-file on disk.
+    if (this.transport === 'stream-json') {
+      const userMessage = {
+        type: 'user',
+        message: { role: 'user', content: [{ type: 'text', text: spec.userPrompt }] },
+        session_id: spec.sessionId,
+      };
+      try {
+        child.stdin.write(`${JSON.stringify(userMessage)}\n`);
+        child.stdin.end();
+      } catch (err) {
+        onEvent?.({ type: 'note', message: `claude: stdin write failed: ${(err as Error).message}` });
+      }
+    }
 
     const toolCalls: AgentToolCallRecord[] = [];
     const textChunks: string[] = [];
@@ -216,18 +249,22 @@ export class ClaudeCodeCliRunner implements AgentRunner {
  * anything not listed); `--permission-mode acceptEdits` lets edits through
  * without a prompt (there's no TTY).
  */
-function buildClaudeArgs<T>(spec: AgentRunSpec<T>, usdPerMillionTokens: number): string[] {
-  const args: string[] = [
-    '-p',
-    spec.userPrompt,
-    '--output-format',
-    'stream-json',
-    '--verbose',
-    '--append-system-prompt',
-    spec.systemPrompt,
-    '--permission-mode',
-    'acceptEdits',
-  ];
+function buildClaudeArgs<T>(
+  spec: AgentRunSpec<T>,
+  usdPerMillionTokens: number,
+  transport: 'print' | 'stream-json' = 'print',
+): string[] {
+  // The two transports differ only in how the user prompt arrives.
+  //  - 'print'       — `-p <prompt>` passes the prompt as an argv string.
+  //  - 'stream-json' — `--input-format stream-json` tells claude to read
+  //                    user messages from stdin; the caller writes the
+  //                    NDJSON `{type:user, …}` line after spawn.
+  const args: string[] =
+    transport === 'stream-json'
+      ? ['--input-format', 'stream-json', '--output-format', 'stream-json', '--verbose',
+         '--append-system-prompt', spec.systemPrompt, '--permission-mode', 'acceptEdits']
+      : ['-p', spec.userPrompt, '--output-format', 'stream-json', '--verbose',
+         '--append-system-prompt', spec.systemPrompt, '--permission-mode', 'acceptEdits'];
   // Pin the session so an operator can `cd <worktree> && claude --resume
   // <sessionId>` after a failed run to take over interactively. We use
   // the agent_run.id as the session id (already a UUID) so the cockpit

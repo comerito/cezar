@@ -83,6 +83,20 @@ export const ConfigSchema = z.object({
       fixer: z.number().default(30),
       reviewer: z.number().default(10),
     }).default({}),
+    // Persistent-session refactor controls.
+    // See docs/REFACTOR-PLAN-persistent-autofix-session.md.
+    // Both default to today's behavior — flipping a flag is the only way
+    // to opt a workspace into the new path.
+    runner: z.object({
+      // 'print'       — spawn `claude -p <userPrompt>` per step (today).
+      // 'stream-json' — spawn once without -p, write user message to
+      //                 stdin, read until type='result'. Phase A.
+      transport: z.enum(['print', 'stream-json']).default('print'),
+      // 'staged'  — four separate `claude` sessions, one per phase (today).
+      // 'unified' — one long-lived session with phase markers. Phase B.
+      //             Requires `transport: 'stream-json'` and forces backend='claude-cli'.
+      mode: z.enum(['staged', 'unified']).default('staged'),
+    }).default({}),
   }).default({}),
   // Optional GUI-equivalent binding block the CLI can supply from
   // `.issuemanagerrc.json`. Empty ⇒ built-in defaults ⇒ behavior identical to
