@@ -136,6 +136,28 @@ of the bigger refactor.
       (fixer). **Lands now.**
 - [x] Dry-run mock binary swapped in when `CEZAR_DRY_RUN=1`. **Lands now.**
 
+### Phase A0 — Empirical spike (one day, resolves §7 Q1/Q2/Q3)
+
+Before committing to Phase A/B, run a contained experiment to validate
+the three premises the rest of the plan rests on:
+
+* **Phase markers work.** Spawn `claude --input-format stream-json
+  --append-system-prompt <draft unified prompt>`, send four
+  `## PHASE: …` user messages, assert the model returns the
+  per-phase JSON shape ≥ 80% of attempts (resolves Q1).
+* **Cache reuse is real.** Capture `cache_read_input_tokens` from
+  the resulting stream-json `usage` blocks and compare against
+  total input. Target: ≥ 50% cache reads by the reviewer phase
+  (resolves Q2).
+* **Disk-resume works.** After the spike completes, check
+  `~/.claude/sessions/<session-id>.json` exists and
+  `claude --resume <session-id>` re-enters the conversation
+  cleanly (resolves Q3).
+
+Spike artifact: a markdown report under `docs/spikes/` with the raw
+numbers and a go/no-go recommendation. **Phase A does not start
+until A0 reports green.**
+
 ### Phase A — Persistent process, per-step prompts (no behavior change)
 
 Wrap the existing per-step spawn in a kept-alive `claude` child that
@@ -190,6 +212,12 @@ floor as Phase A but the floor is much lower because of cache reuse.
 defaults `'staged'`. Per-workspace override possible via Settings →
 Autofix. Roll out by flipping one workspace at a time.
 
+**Backend lock (decided in §7 Q4):** when `mode='unified'`, the runner
+factory refuses any backend other than `'claude-cli'` with a clear
+error. Anthropic API / SDK workspaces stay on staged mode until the
+SDK exposes equivalent session semantics. The staged code path is
+unchanged.
+
 **Cockpit changes:** event stream needs a new event type
 `{type: 'phase-transition', phase: 'analyzer'}` so the UI can keep
 showing per-phase headers even though it's one underlying session.
@@ -232,40 +260,98 @@ implementing once the long single-session is the primary path.
 | 4 specialised system prompts, ~3k chars each | 1 unified prompt, ~9k chars | Yes — cache amortises it |
 | Per-step max-turns (15/30/10) | One pooled budget via `--max-budget-usd` | Coarser, but cheaper overall |
 | Per-step model (Sonnet/Sonnet/Haiku) | One model for whole session | Lose Haiku savings; gain cache savings |
-| Structured JSON enforced per step (clean parse boundaries) | Each phase marker still demands JSON, but parser must scan within a long transcript | Marginally messier; doable |
+| Structured JSON enforced per step (clean parse boundaries) | Each phase marker still demands JSON, but a mismatch is **warn-only** (see §7 Q6) — the pipeline continues with whatever the model produced | Looser; acceptable |
 | Cockpit shows discrete steps with their own `agent_runs` row | Cockpit shows phases derived from in-stream markers | Mostly cosmetic, requires UI tweak |
-| Can swap claude → API by changing backend | Tightly couples autofix to claude CLI's stream-json contract | Real downside — see §7 |
+| Can swap claude → API by changing backend | **Unified mode is locked to the claude-cli backend** (see §7 Q4); the API/SDK backend stays available via staged mode | Accepted constraint |
 
-## 7. Open questions
+## 7. Resolved decisions
 
-1. **Does `--input-format stream-json --output-format stream-json`
-   give us stable phase markers in the output stream?** Need a one-day
-   spike: run a unified prompt with phase markers as user messages,
-   verify the model reliably responds with the JSON shape per phase.
-2. **Cache hit rate at scale.** Anthropic's cache TTL is 5 min by
-   default (configurable). A long autofix run with a 20-min fixer step
-   will partially exhaust the cache. Need to measure on a real run
-   what fraction of tokens actually read from cache.
-3. **Resumability after process crash.** If the runner process dies
-   mid-conversation, can we resume the claude session from disk
-   history (`~/.claude/sessions/<uuid>.json`) via `--resume`? Janitor
-   relies on this for operator handoff; we'd rely on it for crash
-   recovery.
-4. **API backend equivalent.** `AnthropicApiRunner` (the SDK path)
-   uses `@anthropic-ai/claude-agent-sdk` which has its own session
-   semantics. Does the same unified-prompt pattern work there, or do
-   we lock unified mode to the CLI backend? If the latter, the runner
-   factory needs to refuse the API backend when `mode='unified'`.
-5. **Cost-weighted token telemetry.** Today we sum
-   `tokensUsed` per step. With one session, we get one combined total —
-   need to split it back per phase for the cockpit so the per-step
-   "Tokens" column still works. Easiest: track tokens at phase
-   transitions and store deltas as `agent_runs.tokens_used`.
-6. **What happens if the model emits JSON for the wrong phase?** Today
-   each step's schema enforces this; mismatch → fail. Unified mode
-   needs the same enforcement — easiest is to validate the schema for
-   the *currently expected* phase against the assistant's final JSON
-   and ask for a re-emit if it doesn't match.
+The original open questions, with the decisions taken on 2026-05-18.
+
+### Q1 — Stream-json phase markers: needs an empirical spike
+
+**Decision: blocker on Phase B until a spike confirms it.** Before
+committing to the unified prompt, run a one-day spike against issue
+#1950 (or another representative bug):
+
+* spawn a `claude` child with `--input-format stream-json
+  --append-system-prompt <unified-prompt-draft>`
+* send four user messages with `## PHASE: …` markers in order
+* assert the model returns the right JSON shape for each phase
+* assert the schemas validate cleanly without a re-emit ≥ 80% of
+  attempts (the 20% failure tolerance is what makes Q6 below work)
+
+If the spike fails the assertion, the unified-prompt premise is
+wrong and we either reshape the prompt or pause Phase B. The spike
+is its own phase — see §5 "Phase A0 — Spike".
+
+### Q2 — Cache TTL at scale: deferred to spike
+
+**Decision: don't measure preemptively; observe during the Phase A0
+spike.** Anthropic's default cache TTL is 5 min; a long fixer step
+will partially exhaust it. The Phase A0 spike already runs end-to-end
+against issue #1950, so the same run gives us cache-hit telemetry
+"for free". If the measured hit rate is below ~50% of input tokens,
+we revisit cache strategy (e.g. explicit `cache_control` markers,
+longer-TTL beta) before Phase B.
+
+### Q3 — Crash resume via `~/.claude/sessions/<uuid>.json`: **rely on it**
+
+**Decision: assume `claude --resume <session-id>` works for completed
+sessions.** Design the runner around it as the recovery story:
+
+* The Phase 0 `--session-id` pinning already gives us stable IDs.
+* If the runner process dies mid-conversation, a watchdog (or a manual
+  operator) can `cd <worktree> && claude --resume <id>` to pick up the
+  conversation and finish it.
+* Phase A0 spike confirms the disk-history file is written in the
+  format we expect. If it's not, fall back to "kill and re-spawn from
+  fresh" — i.e. the same as today.
+
+### Q4 — API backend support: **locked to CLI**
+
+**Decision: unified mode requires `backend='claude-cli'`.** The
+`runnerFactory` in `workflow-engine.ts` throws when
+`mode='unified' && backend !== 'claude-cli'`. Staged mode stays
+fully backend-agnostic so Anthropic-API workspaces aren't blocked
+from upgrading their other settings.
+
+This means the `mode` toggle in Settings → Autofix should grey out
+when the workspace has chosen the API/SDK backend, with a tooltip
+pointing at this decision.
+
+### Q5 — Per-phase token telemetry: **track at phase transitions**
+
+**Decision: use the default approach proposed.** When the runner
+detects a phase marker arriving on stdin, it snapshots the
+session's cumulative `tokensUsed` and records it as the **finish**
+delta for the previous phase's `agent_runs` row, and as the
+**start** baseline for the next. The cockpit's per-step Tokens
+column keeps showing realistic numbers; cache-discounted weights
+are applied the same way as today (`costWeightedTokens` in
+`structured-output.ts`).
+
+### Q6 — Schema mismatch on phase JSON: **warn, don't fail**
+
+**Decision: be permissive.** When the model returns JSON for the
+wrong phase, or returns malformed JSON, or skips the JSON entirely:
+
+* Emit a `note` event on the step's event stream: `"phase JSON did
+  not validate — continuing with best-effort parse"`.
+* Attempt a best-effort parse: try the schema for the expected
+  phase; if it fails, try each other phase's schema; if none parse,
+  log the raw text and keep going.
+* **Do not** halt the pipeline. The autofix workflow's later steps
+  (reviewer especially) can compensate for a sloppy analyzer or
+  fixer response.
+
+Rationale: hard schema enforcement made sense when each step was
+its own process and a failed parse meant the step had to retry from
+scratch. In unified mode the model already has the context to
+recover on the next phase marker; failing the whole run on JSON
+shape is too aggressive. Failures are still visible in the cockpit
+via the `note` events — operators can intervene when the warnings
+pile up.
 
 ## 8. Migration / rollout
 
@@ -336,7 +422,13 @@ THEN the run completes in less than 5 minutes
   AND cost-weighted tokens are < 200k (vs ~470k staged)
   AND the four agent_runs rows are present, all sharing the same session_id
   AND grep "spawn claude" returns 1
+  AND the run reaches status='pr-opened' OR 'failed' (NOT halted by
+      schema mismatch — per §7 Q6 those are warn-only `note` events)
 ```
 
 These are the load-bearing assertions — if they don't hold, the
 refactor's premise is wrong and we should bail before Phase C.
+
+The Phase A0 spike (§5) has its own go/no-go criteria that gate
+Phase A. Those criteria are stricter — if they fail, Phase B's
+assertions are unreachable by definition.
