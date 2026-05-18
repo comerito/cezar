@@ -47,11 +47,13 @@ export default async function RunnersPage() {
 
   if (!workspace) {
     return (
-      <div className="px-8 py-6">
-        <header className="mb-6 border-b border-border pb-5">
-          <h1 className="text-2xl font-semibold tracking-tight">Runners</h1>
+      <div className="mx-auto max-w-[1080px] px-8 py-6">
+        <header className="mb-6">
+          <h1 className="font-display text-[28px] font-semibold leading-tight tracking-tight text-on-surface">
+            Runners
+          </h1>
         </header>
-        <div className="rounded-lg border border-dashed border-border bg-bg-elevated p-8 text-center text-sm text-fg-muted">
+        <div className="rounded-lg border border-dashed border-outline-variant bg-surface-container-low p-8 text-center text-sm text-on-surface-variant">
           No workspace selected. Create one first.
         </div>
       </div>
@@ -81,20 +83,29 @@ export default async function RunnersPage() {
     '';
 
   return (
-    <div className="px-8 py-6">
-      <header className="mb-8 border-b border-border pb-5">
-        <div className="flex items-center gap-3 text-sm text-fg-subtle">
-          <Link href="/settings" className="hover:text-fg">Settings</Link>
-          <span>/</span>
-          <span className="text-fg">Runners</span>
-        </div>
-        <h1 className="mt-1 text-2xl font-semibold tracking-tight">Runners</h1>
-        <p className="mt-1 text-sm text-fg-muted">
-          Self-hosted runners pick up <code className="text-fg">claude-cli</code> /{' '}
-          <code className="text-fg">codex-cli</code> jobs on your own infra under your own CLI login.
-          The managed cloud runner handles <code className="text-fg">anthropic-api</code> jobs.{' '}
-          See <code className="text-fg">docs/runner-setup.md</code> for the full setup.
-          {!isAdmin && <span className="ml-2 text-fg-subtle">(read-only — admin required to register or revoke)</span>}
+    <div className="mx-auto max-w-[1080px] px-8 py-6">
+      <header className="mb-6">
+        <nav className="mb-2 flex items-center gap-2 text-xs text-on-surface-variant" aria-label="Breadcrumb">
+          <Link href="/settings" className="hover:text-on-surface">Settings</Link>
+          <span className="text-outline">›</span>
+          <span className="text-on-surface">Runners</span>
+        </nav>
+        <h1 className="font-display text-[28px] font-semibold leading-tight tracking-tight text-on-surface">
+          Runners
+        </h1>
+        <p className="mt-2 max-w-[820px] text-sm leading-relaxed text-on-surface-variant">
+          Self-hosted runners pick up{' '}
+          <code className="rounded bg-surface-container px-1 py-px font-mono text-[12px] text-on-surface">claude-cli</code>{' '}
+          /{' '}
+          <code className="rounded bg-surface-container px-1 py-px font-mono text-[12px] text-on-surface">codex-cli</code>{' '}
+          jobs on your own infra under your own CLI login. The managed cloud handles{' '}
+          <code className="rounded bg-surface-container px-1 py-px font-mono text-[12px] text-on-surface">anthropic-api</code>{' '}
+          jobs. See{' '}
+          <code className="rounded bg-surface-container px-1 py-px font-mono text-[12px] text-on-surface">docs/runner-setup.md</code>{' '}
+          for the full setup.
+          {!isAdmin && (
+            <span className="ml-1 text-outline">— read-only, admin required to register or revoke.</span>
+          )}
         </p>
       </header>
 
