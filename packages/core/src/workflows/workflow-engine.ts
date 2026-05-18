@@ -7,6 +7,8 @@ import { createAgentRunner } from '../agents/runner-factory.js';
 import { discoverSkills, type Skill } from '../skills/skill-catalog.js';
 import { resolveStepConfig, type WorkflowBinding, type WorkspaceWorkflowSettings, DEFAULT_WORKSPACE_WORKFLOW_SETTINGS } from './binding.js';
 import { commitAll, getDiffAgainstBase, startWorktreeAutosaver } from '../actions/autofix/worktree.js';
+import { PersistentClaudeSession } from '../agents/persistent-claude-session.js';
+import { UNIFIED_AUTOFIX_SYSTEM_PROMPT } from '../actions/autofix/prompts/autofix-unified.js';
 import { TokenBudget } from '../actions/autofix/token-budget.js';
 import { parseStructured } from '../agents/structured-output.js';
 import {
@@ -266,6 +268,20 @@ export class WorkflowEngine {
     let prUrl: string | undefined;
     let prNumber = ctx.prNumber;
 
+    // Phase B: unified persistent session for autofix.
+    // Per docs/REFACTOR-PLAN-persistent-autofix-session.md §5 Phase B.
+    // Only applies when ALL of:
+    //   - this is the autofix workflow (the only one with the 4-role shape)
+    //   - config.autofix.runner.mode === 'unified'
+    //   - we have a worktree
+    // Otherwise stays staged (today's behavior; one process per step).
+    const unifiedSession = await this.maybeStartUnifiedSession({
+      workflowId: workflow.id,
+      config: ctx.config,
+      worktreePath,
+      onEvent: ctx.onAgentEvent,
+    });
+
     const living = new LivingComment(
       ctx.github,
       ctx.issueNumber,
@@ -295,6 +311,13 @@ export class WorkflowEngine {
       status: WorkflowRunStatus,
       reason?: string,
     ): Promise<WorkflowRunResult<W>> => {
+      // Stop the unified session FIRST — its child needs the worktree
+      // path to still exist for any pending flushes. (dispose may remove it.)
+      if (unifiedSession) {
+        await unifiedSession.stop().catch((err) => {
+          ctx.onEvent?.(`[#${ctx.issueNumber}] unified session stop failed: ${(err as Error).message}`);
+        });
+      }
       if (disposeWorktree) await disposeWorktree().catch(() => {});
       await living.finalize({
         done: status === 'succeeded',
@@ -380,6 +403,7 @@ export class WorkflowEngine {
             tokenBudgetPerAttempt: ctx.tokenBudgetPerAttempt ?? ctx.config.autofix?.tokenBudgetPerAttempt,
             workflowId: workflow.id, worktreePath,
             living,
+            unifiedSession,
           });
           outcome = r.outcome;
           record = r.record;
@@ -603,6 +627,21 @@ export class WorkflowEngine {
     if (step.autoProceed?.(ctx)) {
       return { kind: 'resolved', outcome: { kind: 'continue' } };
     }
+    // Phase C (TODO — see docs/REFACTOR-PLAN-persistent-autofix-session.md §5
+    // "Phase C"): in unified mode, a paused gate should keep the
+    // PersistentClaudeSession's child alive so resume can pick up
+    // mid-conversation with the cache prefix intact. Today we still
+    // return `paused`; the workflow_runs row is paused, the runner
+    // process exits, and a resume re-spawns a fresh session (same as
+    // staged). Wiring up the alive-child path requires:
+    //   1. A Supabase channel subscription here that resolves on
+    //      'resume' or 'cancel' broadcasts for this workflow_run.id.
+    //   2. Keeping the parent runner process alive for the whole pause
+    //      duration (today the dispatch worker is short-lived).
+    //   3. A heartbeat/keepalive on the child every ~5 min so the SDK
+    //      doesn't time out.
+    // Left as the next PR's work — staged mode handles the gate just
+    // fine while the rest of Phase B settles.
     const prompt = step.buildPrompt(ctx);
     const decision = await ctx.requestHumanDecision(prompt);
     if (!decision) return { kind: 'paused' };
@@ -626,6 +665,9 @@ export class WorkflowEngine {
       workflowId: string;
       worktreePath?: string;
       living: LivingComment;
+      /** Phase B: when set, the engine routes agent steps through this
+       *  long-lived session instead of spawning a fresh `claude` per step. */
+      unifiedSession: PersistentClaudeSession | null;
     },
   ): Promise<{ outcome: StepOutcome<W>; record: AgentRunRecord }> {
     const { stepCtx, iteration, bindings, skills, runnerFactory, workflowId } = args;
@@ -696,7 +738,22 @@ export class WorkflowEngine {
 
     let result: Awaited<ReturnType<typeof runner.run>>;
     try {
-      result = await runner.run(spec, (e) => stepCtx.emit(e));
+      if (args.unifiedSession) {
+        // Phase B: route through the persistent session. The unified
+        // system prompt was set once when the session started; here we
+        // send the step's user prompt with a phase marker and let the
+        // session return the assistant text + per-phase token delta.
+        const phaseResult = await args.unifiedSession.sendPhase(step.id, spec.userPrompt);
+        result = {
+          text: phaseResult.text,
+          parsed: null,
+          toolCalls: phaseResult.toolCalls,
+          tokensUsed: phaseResult.tokensUsed,
+          budgetExceeded: false,
+        };
+      } else {
+        result = await runner.run(spec, (e) => stepCtx.emit(e));
+      }
     } finally {
       if (stopAutosave) await stopAutosave();
     }
@@ -745,6 +802,49 @@ export class WorkflowEngine {
     }
 
     return { outcome, record };
+  }
+
+  /**
+   * Start a unified `PersistentClaudeSession` for the autofix workflow
+   * when the workspace has opted in via `config.autofix.runner.mode`.
+   * Returns `null` otherwise — staged mode keeps today's behavior.
+   *
+   * Gates (per docs/REFACTOR-PLAN-persistent-autofix-session.md §5/§7):
+   *   • workflow.id === 'autofix' (only workflow with the 4-role shape)
+   *   • config.autofix.runner.mode === 'unified'
+   *   • a worktree is available (claude needs cwd)
+   *
+   * Backend lock (Q4) is enforced in the runner factory — by the time
+   * this method is called the workspace is already in CLI territory.
+   */
+  private async maybeStartUnifiedSession(args: {
+    workflowId: string;
+    config: Config;
+    worktreePath: string | undefined;
+    onEvent: ((evt: AgentEvent) => void) | undefined;
+  }): Promise<PersistentClaudeSession | null> {
+    if (args.workflowId !== 'autofix') return null;
+    if (args.config.autofix?.runner?.mode !== 'unified') return null;
+    if (!args.worktreePath) return null;
+    const sessionId = randomUUID();
+    const session = new PersistentClaudeSession({
+      systemPrompt: UNIFIED_AUTOFIX_SYSTEM_PROMPT,
+      sessionId,
+      cwd: args.worktreePath,
+      model: args.config.autofix?.models?.analyzer,
+      // Unified mode pools the analyzer/fixer/reviewer tool budgets;
+      // the agent decides per phase which tools to invoke from this
+      // union. Read + write are both allowed since fixer needs them.
+      allowedTools: ['Read', 'Grep', 'Glob', 'Edit', 'Write', 'NotebookEdit', 'Bash'],
+      bashAllowlist: args.config.autofix?.bashAllowlist,
+      onEvent: (e) => {
+        // Forward to the same agent-event sink the staged path uses so
+        // the cockpit doesn't need to know which mode produced an event.
+        args.onEvent?.(e);
+      },
+    });
+    session.start();
+    return session;
   }
 }
 
