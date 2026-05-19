@@ -24,6 +24,13 @@ failed, finished — with controls.
 
 </div>
 
+<!-- SCREENSHOT: Hero image of the cockpit at /cockpit showing multiple runs in
+     mixed states (queued · running · paused · failed · finished) with status
+     badges, last-step column, and the row-level controls visible on hover.
+     Save as: docs/images/cockpit-hero.png  (recommended ~1600×900) -->
+
+![Cockpit — every agent run, live](docs/images/cockpit-hero.png)
+
 ---
 
 ## Why Cezar
@@ -115,6 +122,19 @@ Every step writes structured events into Supabase; the **cockpit** (`/cockpit`,
 filling in live. A single *living comment* on the issue (then the PR) is edited
 as steps complete — one comment per run, not a wall of bot chatter.
 
+<!-- SCREENSHOT: A single run page (/cockpit/[runId]) showing the step graph
+     filling in live: completed steps with green check, the current step
+     spinning, the streaming event log at the bottom (text · tool-call ·
+     tool-result events). Save as: docs/images/cockpit-run-detail.png -->
+
+![Run detail — live step graph + event stream](docs/images/cockpit-run-detail.png)
+
+<!-- SCREENSHOT: A GitHub issue showing Cezar's single "living" comment with
+     the per-step progress (verify-in-repo ✓ · root-cause ✓ · fix ⏳).
+     Save as: docs/images/github-issue-comment.png -->
+
+![The living comment on a GitHub issue](docs/images/github-issue-comment.png)
+
 ---
 
 ## Quick start
@@ -145,6 +165,12 @@ node packages/cli/dist/index.js run bug-detector --apply
 `npm link packages/cli` (or `yarn workspace cezar link`) installs the `cezar`
 binary globally.
 
+<!-- SCREENSHOT: Terminal screenshot of the `cezar` interactive hub — the
+     setup-wizard greeting, then the main menu of analysis actions
+     (bug-detector, duplicates, auto-label, …). Save as: docs/images/cli-hub.png -->
+
+![CLI interactive hub](docs/images/cli-hub.png)
+
 ### Option 2 — Self-hosted SaaS (cockpit + auto-triage)
 
 Run the full Next.js app against your own Supabase project.
@@ -173,6 +199,12 @@ yarn workspace @cezar/gui dev
 Then install the GitHub App on your repo, create a workspace via
 **Settings → Workspaces**, and open `/dashboard`. New issues will start
 triaging automatically.
+
+<!-- SCREENSHOT: The /dashboard page after a fresh workspace — stat row (Open
+     / Closed / PRs open / Digested / Bugs), the "Recent agent runs" card, and
+     the action grid below. Save as: docs/images/dashboard.png -->
+
+![Dashboard](docs/images/dashboard.png)
 
 ### Option 3 — Self-hosted runner
 
@@ -237,6 +269,13 @@ The runner dispatches on the Action's `effects` field:
 Both modes share the same effect registry, the same Zod validation, and the
 same audit trail.
 
+<!-- SCREENSHOT: The Action editor (/actions/[name] or /actions/new) showing
+     the system prompt textarea, the skill-ref multi-select, the trigger
+     checkboxes, the effect allowlist, and the mode toggle (Declared / Tool-use).
+     Save as: docs/images/action-editor.png -->
+
+![Action editor](docs/images/action-editor.png)
+
 ### Skills as composable playbooks
 
 `skill_refs` names skills whose markdown body is concatenated into the system
@@ -288,6 +327,12 @@ Empty `.ai/skills/` is fully supported — every Action uses its built-in defaul
 Workspaces can override any built-in via copy-on-write — the `/actions/<name>`
 page in the GUI clones the spec to a workspace-scoped row you can edit freely.
 
+<!-- SCREENSHOT: The /actions list page showing all 15 built-in Actions with
+     their trigger badges, enabled toggles, and the "Override" / "Edit" buttons.
+     Save as: docs/images/actions-list.png -->
+
+![Actions catalog](docs/images/actions-list.png)
+
 ---
 
 ## Workflow engine
@@ -320,6 +365,13 @@ So an unconfigured workspace behaves exactly like the defaults.
 `runWorkflow` (in [`packages/core/src/workflows/workflow-engine.ts`](packages/core/src/workflows/workflow-engine.ts))
 threads a blackboard, emits one `AgentRunRecord` per step, and writes
 `agent_run_events` rows the cockpit subscribes to.
+
+<!-- SCREENSHOT: Settings → Workflows page showing the autofix pipeline rows
+     (verify-in-repo · root-cause · fix · review-loop · open-pr) with the
+     skill / backend / model dropdowns next to each step. Save as:
+     docs/images/settings-workflows.png -->
+
+![Settings — Workflows](docs/images/settings-workflows.png)
 
 ---
 
@@ -401,6 +453,13 @@ The runner never sees a Supabase credential — the SaaS mints a short-lived
 GitHub App token per job and ships it (plus the merged workspace config and
 the issue store snapshot) in the claim response. Heartbeats every few seconds;
 stalled jobs are re-queued by the dispatcher.
+
+<!-- SCREENSHOT: Settings → Runners page showing the registered runners (name,
+     backends served, last heartbeat) plus the ready-to-paste
+     `cezar-runner start --url … --token … --backends …` command at the top.
+     Save as: docs/images/settings-runners.png -->
+
+![Settings — Runners](docs/images/settings-runners.png)
 
 ---
 
