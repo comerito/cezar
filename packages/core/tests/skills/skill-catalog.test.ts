@@ -6,9 +6,16 @@ import { discoverSkills, skillsForStage } from '../../src/skills/skill-catalog.j
 const here = dirname(fileURLToPath(import.meta.url));
 const fixtureRepoRoot = join(here, '..', 'fixtures', 'skills-repo');
 
+// `discoverSkills` now returns the merged catalog — built-in skills shipped
+// with @cezar/core plus repo `.ai/skills/`. These tests intentionally assert
+// repo-side discovery only by filtering by source.
+function repoSkills(s: Awaited<ReturnType<typeof discoverSkills>>) {
+  return s.filter((x) => x.source === 'repo');
+}
+
 describe('discoverSkills', () => {
   it('finds skills, parses frontmatter, strips it from body, sorts by name', async () => {
-    const skills = await discoverSkills(fixtureRepoRoot);
+    const skills = repoSkills(await discoverSkills(fixtureRepoRoot));
     expect(skills.map((s) => s.name)).toEqual(['deep-root-cause', 'house-style']);
 
     const deep = skills.find((s) => s.name === 'deep-root-cause')!;
@@ -27,20 +34,26 @@ describe('discoverSkills', () => {
     expect(house.body).toContain('Prefer named exports.');
   });
 
-  it('returns [] when the skills directory does not exist', async () => {
-    const skills = await discoverSkills(fixtureRepoRoot, '.does-not-exist/skills');
+  it('returns no repo skills when the skills directory does not exist', async () => {
+    const skills = repoSkills(await discoverSkills(fixtureRepoRoot, '.does-not-exist/skills'));
     expect(skills).toEqual([]);
   });
 
-  it('returns [] for a repo with no .ai/skills at all', async () => {
-    const skills = await discoverSkills(join(here, '..', 'fixtures', 'no-such-repo'));
+  it('returns no repo skills for a repo with no .ai/skills at all', async () => {
+    const skills = repoSkills(await discoverSkills(join(here, '..', 'fixtures', 'no-such-repo')));
     expect(skills).toEqual([]);
+  });
+
+  it('returns built-in skills regardless of the repo state', async () => {
+    const skills = await discoverSkills(join(here, '..', 'fixtures', 'no-such-repo'));
+    // At least one built-in (bug-classification) ships with @cezar/core.
+    expect(skills.some((s) => s.source === 'built-in' && s.name === 'bug-classification')).toBe(true);
   });
 });
 
 describe('skillsForStage', () => {
   it('partitions skills by whether suggestedStages includes the stage', async () => {
-    const skills = await discoverSkills(fixtureRepoRoot);
+    const skills = repoSkills(await discoverSkills(fixtureRepoRoot));
     const { suggested, others } = skillsForStage(skills, 'root-cause');
     expect(suggested.map((s) => s.name)).toEqual(['deep-root-cause']);
     expect(others.map((s) => s.name)).toEqual(['house-style']);

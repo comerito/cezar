@@ -1,0 +1,300 @@
+'use client';
+
+import { useCallback, useEffect, useId, useRef, useState, useTransition } from 'react';
+import { useRouter } from 'next/navigation';
+import { cn } from '@/components/ui/cn';
+import { MoreVerticalIcon } from '@/components/icons';
+import { RowMenuPortal } from '@/components/row-menu-portal';
+import {
+  clearAutoTriage,
+  deleteAction,
+  duplicateAction,
+  overrideBuiltInAction,
+  resetBuiltInToDefault,
+  setActionEnabled,
+  setAutoTriage,
+} from '@/app/actions/[name]/action-mutations';
+import { RunNowModal } from './run-now-modal';
+
+export interface ActionRowMenuProps {
+  id: string;
+  name: string;
+  kind: 'built-in' | 'user';
+  target: 'issue' | 'pr';
+  enabled: boolean;
+  isAutoTriage: boolean;
+  hasUserOverride: boolean;
+  readOnly?: boolean;
+  /** Optimistic status flip parent callback — keeps the row's pill in sync. */
+  onEnabledChange?: (enabled: boolean) => void;
+}
+
+interface MenuItem {
+  id: string;
+  label: string;
+  onSelect?: () => void;
+  href?: string;
+  variant?: 'primary' | 'destructive';
+  disabled?: boolean;
+  group: number;
+}
+
+export function ActionRowMenu({
+  id,
+  name,
+  kind,
+  target,
+  enabled,
+  isAutoTriage,
+  hasUserOverride,
+  readOnly = false,
+  onEnabledChange,
+}: ActionRowMenuProps) {
+  const router = useRouter();
+  const [open, setOpen] = useState(false);
+  const [runNowOpen, setRunNowOpen] = useState(false);
+  const [pending, startTransition] = useTransition();
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const popoverRef = useRef<HTMLDivElement>(null);
+  const menuId = useId();
+
+  // ── close-on-outside-click / Esc ─────────────────────────────────────────
+  useEffect(() => {
+    if (!open) return;
+    function onDocClick(e: MouseEvent) {
+      const target = e.target as Node | null;
+      if (!target) return;
+      if (popoverRef.current?.contains(target)) return;
+      if (triggerRef.current?.contains(target)) return;
+      setOpen(false);
+    }
+    function onKey(e: KeyboardEvent) {
+      if (e.key === 'Escape') {
+        e.stopPropagation();
+        setOpen(false);
+        triggerRef.current?.focus();
+      }
+    }
+    document.addEventListener('mousedown', onDocClick);
+    document.addEventListener('keydown', onKey);
+    return () => {
+      document.removeEventListener('mousedown', onDocClick);
+      document.removeEventListener('keydown', onKey);
+    };
+  }, [open]);
+
+  // ── server-action wrappers ───────────────────────────────────────────────
+  const doToggle = useCallback(() => {
+    const next = !enabled;
+    onEnabledChange?.(next);
+    startTransition(async () => {
+      const r = await setActionEnabled(name, next);
+      if (!r.ok) {
+        onEnabledChange?.(enabled);
+        alert(r.error ?? 'Could not toggle this action');
+      }
+      router.refresh();
+    });
+  }, [enabled, name, onEnabledChange, router]);
+
+  const doSetAutoTriage = useCallback(() => {
+    startTransition(async () => {
+      const r = await setAutoTriage(id);
+      if (!r.ok) alert(r.error ?? 'Could not set auto-triage');
+      router.refresh();
+    });
+  }, [id, router]);
+
+  const doClearAutoTriage = useCallback(() => {
+    startTransition(async () => {
+      const r = await clearAutoTriage();
+      if (!r.ok) alert(r.error ?? 'Could not clear auto-triage');
+      router.refresh();
+    });
+  }, [router]);
+
+  const doOverride = useCallback(() => {
+    startTransition(async () => {
+      const r = await overrideBuiltInAction(name);
+      if (!r.ok) {
+        alert(r.error ?? 'Could not override this built-in');
+        return;
+      }
+      router.push(`/actions/${encodeURIComponent(r.slug ?? name)}`);
+    });
+  }, [name, router]);
+
+  const doReset = useCallback(() => {
+    if (!window.confirm(`Reset "${name}" to the built-in default? Your customisations will be lost.`)) return;
+    startTransition(async () => {
+      const r = await resetBuiltInToDefault(name);
+      if (!r.ok) alert(r.error ?? 'Could not reset');
+      router.refresh();
+    });
+  }, [name, router]);
+
+  const doDuplicate = useCallback(() => {
+    startTransition(async () => {
+      const r = await duplicateAction(name);
+      if (!r.ok || !r.newName) {
+        alert(r.error ?? 'Could not duplicate');
+        return;
+      }
+      router.push(`/actions/${encodeURIComponent(r.newName)}`);
+    });
+  }, [name, router]);
+
+  const doCopyName = useCallback(() => {
+    void navigator.clipboard.writeText(name).then(
+      () => undefined,
+      () => alert('Could not copy to clipboard'),
+    );
+  }, [name]);
+
+  const doDelete = useCallback(() => {
+    if (!window.confirm(`Delete the user action "${name}"? This cannot be undone.`)) return;
+    startTransition(async () => {
+      const r = await deleteAction(name);
+      if (!r.ok) alert(r.error ?? 'Could not delete');
+      router.refresh();
+    });
+  }, [name, router]);
+
+  // ── menu shape ───────────────────────────────────────────────────────────
+  const items: MenuItem[] = [
+    { id: 'open', label: 'Open details', href: `/actions/${encodeURIComponent(name)}`, group: 1 },
+    { id: 'run', label: 'Run now…', onSelect: () => setRunNowOpen(true), disabled: readOnly, group: 1 },
+    { id: 'toggle', label: enabled ? 'Disable' : 'Enable', onSelect: doToggle, disabled: readOnly, group: 1 },
+  ];
+
+  if (target === 'issue') {
+    if (isAutoTriage) {
+      items.push({ id: 'unset-auto-triage', label: 'Unset auto-triage', onSelect: doClearAutoTriage, disabled: readOnly, group: 2 });
+    } else {
+      items.push({ id: 'set-auto-triage', label: 'Set as auto-triage', onSelect: doSetAutoTriage, disabled: readOnly, group: 2 });
+    }
+  }
+
+  if (kind === 'built-in') {
+    if (hasUserOverride) {
+      items.push({ id: 'reset', label: 'Reset to default', onSelect: doReset, disabled: readOnly, group: 3 });
+    } else {
+      items.push({ id: 'override', label: 'Override (copy & edit)', onSelect: doOverride, disabled: readOnly, group: 3 });
+    }
+  }
+
+  items.push({ id: 'duplicate', label: 'Duplicate', onSelect: doDuplicate, disabled: readOnly, group: 4 });
+  items.push({ id: 'copy-name', label: 'Copy name', onSelect: doCopyName, group: 5 });
+  items.push({
+    id: 'delete',
+    label: 'Delete',
+    onSelect: doDelete,
+    disabled: readOnly || kind !== 'user',
+    variant: 'destructive',
+    group: 6,
+  });
+
+  // ── render ───────────────────────────────────────────────────────────────
+  function handleItemClick(item: MenuItem) {
+    if (item.disabled) return;
+    setOpen(false);
+    if (item.href) {
+      router.push(item.href);
+      return;
+    }
+    item.onSelect?.();
+  }
+
+  function handleTriggerKey(e: React.KeyboardEvent<HTMLButtonElement>) {
+    if (e.key === 'ArrowDown' || e.key === 'Enter' || e.key === ' ') {
+      e.preventDefault();
+      setOpen(true);
+      // Defer focus to the first item until after the popover renders.
+      requestAnimationFrame(() => {
+        popoverRef.current?.querySelector<HTMLButtonElement>('[role="menuitem"]:not([aria-disabled="true"])')?.focus();
+      });
+    }
+  }
+
+  function handleMenuKey(e: React.KeyboardEvent<HTMLDivElement>) {
+    if (e.key !== 'ArrowDown' && e.key !== 'ArrowUp') return;
+    e.preventDefault();
+    const buttons = Array.from(
+      popoverRef.current?.querySelectorAll<HTMLButtonElement>('[role="menuitem"]:not([aria-disabled="true"])') ?? [],
+    );
+    if (buttons.length === 0) return;
+    const active = document.activeElement as HTMLButtonElement | null;
+    const idx = active ? buttons.indexOf(active) : -1;
+    const next =
+      e.key === 'ArrowDown'
+        ? buttons[(idx + 1) % buttons.length]
+        : buttons[(idx - 1 + buttons.length) % buttons.length];
+    next.focus();
+  }
+
+  // Group dividers: render an <hr> when consecutive items have different `group`.
+  const rendered: React.ReactNode[] = [];
+  for (let i = 0; i < items.length; i++) {
+    const item = items[i];
+    if (i > 0 && items[i - 1].group !== item.group) {
+      rendered.push(<div key={`sep-${i}`} className="my-1 h-px bg-outline-variant/60" aria-hidden />);
+    }
+    rendered.push(
+      <button
+        key={item.id}
+        type="button"
+        role="menuitem"
+        aria-disabled={item.disabled ? 'true' : undefined}
+        disabled={item.disabled || pending}
+        onClick={() => handleItemClick(item)}
+        className={cn(
+          'block w-full px-3 py-2 text-left text-sm transition-colors',
+          'focus:outline-none focus:bg-surface-container',
+          item.variant === 'destructive'
+            ? 'text-error hover:bg-error-container/30'
+            : 'text-on-surface hover:bg-surface-container',
+          (item.disabled || pending) && 'cursor-not-allowed opacity-40 hover:bg-transparent',
+        )}
+      >
+        {item.label}
+      </button>,
+    );
+  }
+
+  return (
+    <>
+      <button
+        ref={triggerRef}
+        type="button"
+        aria-haspopup="menu"
+        aria-expanded={open}
+        aria-controls={menuId}
+        aria-label={`${name} actions`}
+        onClick={() => setOpen((v) => !v)}
+        onKeyDown={handleTriggerKey}
+        className="flex h-7 w-7 items-center justify-center rounded-md text-on-surface-variant hover:bg-surface-container hover:text-on-surface"
+      >
+        <MoreVerticalIcon className="h-4 w-4" />
+      </button>
+      <RowMenuPortal
+        open={open}
+        triggerRef={triggerRef}
+        popoverRef={popoverRef}
+        onClose={() => setOpen(false)}
+        id={menuId}
+        ariaLabel={`${name} actions menu`}
+        onKeyDown={handleMenuKey}
+      >
+        {rendered}
+      </RowMenuPortal>
+      {runNowOpen && (
+        <RunNowModal
+          actionId={id}
+          actionName={name}
+          target={target}
+          onClose={() => setRunNowOpen(false)}
+        />
+      )}
+    </>
+  );
+}

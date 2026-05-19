@@ -1,0 +1,189 @@
+'use server';
+
+import { revalidatePath } from 'next/cache';
+import { getSessionUser } from '@/lib/auth';
+import { getActiveWorkspace } from '@/lib/workspace';
+import { createSupabaseAdminClient } from '@/lib/supabase/server';
+import { readSkillBody } from '@/lib/skill-body';
+
+export interface OverridePayload {
+  executionMode: string;
+  triggers: string[];
+  outputs: string[];
+  capabilities: string[];
+  body: string;
+}
+
+export interface SaveOverrideResult {
+  ok: boolean;
+  error?: string;
+  updatedAt?: string;
+  enabled?: boolean;
+}
+
+/**
+ * Internal helpers: every action below repeats the same auth/workspace
+ * preamble. Pulling it out keeps the public surface focused.
+ */
+async function requireAdminWorkspace() {
+  const user = await getSessionUser();
+  if (!user) return { error: 'Not authenticated' as const };
+  const workspace = await getActiveWorkspace();
+  if (!workspace) return { error: 'No workspace selected' as const };
+  if (workspace.role !== 'admin') return { error: 'Only admins can edit overrides' as const };
+  return { user, workspace };
+}
+
+function revalidateSkill(name: string) {
+  revalidatePath('/skills');
+  revalidatePath(`/skills/${encodeURIComponent(name)}`);
+}
+
+/**
+ * Full-payload save. If the override doesn't exist yet, it's created from the
+ * original (cloned) body when the caller didn't pass one — that way "Save"
+ * after only changing metadata still produces a faithful copy.
+ */
+export async function saveSkillOverride(
+  skillName: string,
+  payload: OverridePayload,
+  options: { enable?: boolean } = {},
+): Promise<SaveOverrideResult> {
+  const auth = await requireAdminWorkspace();
+  if ('error' in auth) return { ok: false, error: auth.error };
+  const { user, workspace } = auth;
+
+  // If the user submitted an empty body, fall back to the original from the
+  // cached clone so we always have *something* to compare against later.
+  let body = payload.body;
+  if (body === '') {
+    const supabase = createSupabaseAdminClient();
+    const { data: skillsRow } = await supabase
+      .from('repo_skills')
+      .select('skills')
+      .eq('workspace_id', workspace.id)
+      .eq('repo', workspace.repoName)
+      .maybeSingle();
+    const skills = Array.isArray(skillsRow?.skills) ? (skillsRow!.skills as Array<{ name?: unknown; path?: unknown }>) : [];
+    const match = skills.find((s) => typeof s?.name === 'string' && s.name === skillName);
+    const path = typeof match?.path === 'string' ? match.path : null;
+    if (path) {
+      const original = await readSkillBody(workspace.repoOwner, workspace.repoName, path);
+      if (original !== null) body = original;
+    }
+  }
+
+  const supabase = createSupabaseAdminClient();
+  const row = {
+    workspace_id: workspace.id,
+    skill_name: skillName,
+    body,
+    execution_mode: payload.executionMode,
+    triggers: payload.triggers,
+    outputs: payload.outputs,
+    capabilities: payload.capabilities,
+    enabled: options.enable ?? true,
+    updated_by: user.id,
+  } as const;
+
+  const { data, error } = await supabase
+    .from('skill_overrides')
+    .upsert(row, { onConflict: 'workspace_id,skill_name' })
+    .select('updated_at, enabled')
+    .single();
+
+  if (error) return { ok: false, error: error.message };
+  revalidateSkill(skillName);
+  return { ok: true, updatedAt: data?.updated_at ?? undefined, enabled: data?.enabled ?? row.enabled };
+}
+
+/**
+ * Body-only autosave. Creates the override if it didn't exist yet, copying
+ * the metadata defaults. Cheaper than the full save so it can run on a
+ * debounce.
+ */
+export async function autosaveSkillOverrideBody(
+  skillName: string,
+  body: string,
+): Promise<SaveOverrideResult> {
+  const auth = await requireAdminWorkspace();
+  if ('error' in auth) return { ok: false, error: auth.error };
+  const { user, workspace } = auth;
+
+  const supabase = createSupabaseAdminClient();
+
+  // If a row exists, update only body. Otherwise insert a default row.
+  const { data: existing } = await supabase
+    .from('skill_overrides')
+    .select('id')
+    .eq('workspace_id', workspace.id)
+    .eq('skill_name', skillName)
+    .maybeSingle();
+
+  if (existing) {
+    const { data, error } = await supabase
+      .from('skill_overrides')
+      .update({ body, updated_by: user.id })
+      .eq('id', existing.id)
+      .select('updated_at, enabled')
+      .single();
+    if (error) return { ok: false, error: error.message };
+    revalidateSkill(skillName);
+    return { ok: true, updatedAt: data?.updated_at ?? undefined, enabled: data?.enabled ?? true };
+  }
+
+  const { data, error } = await supabase
+    .from('skill_overrides')
+    .insert({
+      workspace_id: workspace.id,
+      skill_name: skillName,
+      body,
+      updated_by: user.id,
+      created_by: user.id,
+    })
+    .select('updated_at, enabled')
+    .single();
+  if (error) return { ok: false, error: error.message };
+  revalidateSkill(skillName);
+  return { ok: true, updatedAt: data?.updated_at ?? undefined, enabled: data?.enabled ?? true };
+}
+
+export async function setSkillOverrideEnabled(
+  skillName: string,
+  enabled: boolean,
+): Promise<SaveOverrideResult> {
+  const auth = await requireAdminWorkspace();
+  if ('error' in auth) return { ok: false, error: auth.error };
+  const { user, workspace } = auth;
+
+  const supabase = createSupabaseAdminClient();
+  const { data, error } = await supabase
+    .from('skill_overrides')
+    .update({ enabled, updated_by: user.id })
+    .eq('workspace_id', workspace.id)
+    .eq('skill_name', skillName)
+    .select('updated_at, enabled')
+    .single();
+  if (error) return { ok: false, error: error.message };
+  revalidateSkill(skillName);
+  return { ok: true, updatedAt: data?.updated_at ?? undefined, enabled: data?.enabled ?? enabled };
+}
+
+/**
+ * Reverts to the upstream skill by deleting the override row entirely.
+ */
+export async function deleteSkillOverride(skillName: string): Promise<SaveOverrideResult> {
+  const auth = await requireAdminWorkspace();
+  if ('error' in auth) return { ok: false, error: auth.error };
+  const { workspace } = auth;
+
+  const supabase = createSupabaseAdminClient();
+  const { error } = await supabase
+    .from('skill_overrides')
+    .delete()
+    .eq('workspace_id', workspace.id)
+    .eq('skill_name', skillName);
+  if (error) return { ok: false, error: error.message };
+  revalidateSkill(skillName);
+  return { ok: true };
+}

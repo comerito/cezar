@@ -4,7 +4,13 @@ import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { cn } from './ui/cn';
 
-export function NavLink({ href, label }: { href: string; label: string }) {
+interface NavLinkProps {
+  href: string;
+  label: string;
+  icon?: React.ReactNode;
+}
+
+export function NavLink({ href, label, icon }: NavLinkProps) {
   const pathname = usePathname();
   const active = pathname === href || pathname.startsWith(href + '/');
 
@@ -12,13 +18,21 @@ export function NavLink({ href, label }: { href: string; label: string }) {
     <Link
       href={href}
       className={cn(
-        'rounded-md px-3 py-2 text-sm transition-colors',
+        'group relative flex items-center gap-3 rounded-md px-3 py-2 text-sm transition-colors',
         active
-          ? 'bg-bg-subtle font-medium text-fg'
-          : 'text-fg-muted hover:bg-bg-subtle hover:text-fg',
+          ? 'bg-surface-container-high font-medium text-primary'
+          : 'text-on-surface-variant hover:bg-surface-container hover:text-on-surface',
       )}
     >
-      {label}
+      {active && (
+        <span className="absolute inset-y-1.5 right-0 w-0.5 rounded-full bg-primary" aria-hidden />
+      )}
+      {icon && (
+        <span className={cn('flex h-5 w-5 items-center justify-center', active ? 'text-primary' : 'text-on-surface-variant group-hover:text-on-surface')}>
+          {icon}
+        </span>
+      )}
+      <span className="truncate">{label}</span>
     </Link>
   );
 }

@@ -10,28 +10,6 @@ import type { Skill } from '../skills/skill-catalog.js';
  */
 export const AUTOFIX_STEP_IDS = ['verify-in-repo', 'root-cause', 'fix', 'review'] as const;
 
-/**
- * Placeholder list of the existing triage-action ids the GUI will later bind as
- * built-in triage steps (docs/REFACTOR-PLAN-agent-cockpit.md §3.2). No logic
- * keys off this yet — it's here so the GUI/CLI can enumerate bindable ids.
- */
-export const BUILTIN_TRIAGE_STEP_IDS = [
-  'bug-detector',
-  'priority',
-  'categorize',
-  'security',
-  'quality',
-  'good-first-issue',
-  'missing-info',
-  'claim-detector',
-  'contributor-welcome',
-  'recurring-questions',
-  'duplicates',
-  'stale',
-  'done-detector',
-  'auto-label',
-] as const;
-
 export type WorkflowStepId = string;
 
 /**

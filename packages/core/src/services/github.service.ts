@@ -34,6 +34,8 @@ export interface RawPullRequest {
   title: string;
   body: string;
   state: 'open' | 'closed';
+  draft: boolean;
+  labels: string[];
   author: string;
   htmlUrl: string;
   headSha: string | null;
@@ -171,6 +173,12 @@ export class GitHubService {
         title: p.title,
         body: p.body ?? '',
         state: p.state === 'closed' ? 'closed' : 'open',
+        draft: p.draft ?? false,
+        labels: Array.isArray(p.labels)
+          ? p.labels
+              .map((l) => (typeof l === 'string' ? l : l?.name ?? null))
+              .filter((n): n is string => typeof n === 'string' && n.length > 0)
+          : [],
         author: p.user?.login ?? 'unknown',
         htmlUrl: p.html_url,
         headSha: p.head?.sha ?? null,

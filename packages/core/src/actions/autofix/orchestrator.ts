@@ -9,7 +9,8 @@ import { TokenBudget } from './token-budget.js';
 import { runAgentSession, type AgentEvent } from './agent-session.js';
 import type { AgentEvent as NormalizedAgentEvent } from '../../agents/agent-runner.js';
 import { LLMService } from '../../services/llm.service.js';
-import { buildDoneDetectorPrompt, DoneDetectorResponseSchema } from '../done-detector/prompt.js';
+import { buildDoneDetectorPrompt, DoneDetectorResponseSchema } from './done-detector-preflight.js';
+import { detectBugSignal } from './bug-signal.js';
 import { ANALYZER_SYSTEM_PROMPT, AnalyzerResultSchema, isNoActionNeeded, buildAnalyzerUserPrompt, type RootCause } from './prompts/analyzer.js';
 import { FIXER_SYSTEM_PROMPT, FixReportSchema, buildFixerUserPrompt, type FixReport } from './prompts/fixer.js';
 import { REVIEWER_SYSTEM_PROMPT, ReviewVerdictSchema, buildReviewerUserPrompt, normalizeVerdict, retryNotesFromVerdict, fallbackVerdictFromProse, type ReviewVerdict } from './prompts/reviewer.js';
@@ -45,6 +46,26 @@ function normalizedToLegacyAgentEvent(e: NormalizedAgentEvent): AgentEvent | nul
     case 'error':
       return null;
   }
+}
+
+/**
+ * Overlay live GitHub fields (labels, state, title, body, updatedAt) onto
+ * the stored issue so the autofix gate sees fresh data. Analysis state and
+ * everything else local stays from the store — only the GitHub-authoritative
+ * fields are replaced.
+ */
+function applyLiveOverlay(
+  stored: StoredIssue,
+  live: Partial<{ state: 'open' | 'closed'; labels: string[]; title: string; body: string; updatedAt: string }>,
+): StoredIssue {
+  return {
+    ...stored,
+    state: live.state ?? stored.state,
+    labels: live.labels ?? stored.labels,
+    title: live.title ?? stored.title,
+    body: live.body ?? stored.body,
+    updatedAt: live.updatedAt ?? stored.updatedAt,
+  };
 }
 
 export type OrchestratorOutcome =
@@ -119,31 +140,40 @@ export class AutofixOrchestrator {
       return { status: 'skipped', reason: 'autofix.repoRoot not set' };
     }
 
-    const issue = this.store.getIssue(issueNumber);
-    if (!issue) return { status: 'skipped', reason: `issue #${issueNumber} not found in store` };
-    if (issue.state !== 'open') return { status: 'skipped', reason: 'issue is closed' };
-    if (issue.analysis.issueType !== 'bug') return { status: 'skipped', reason: 'not classified as a bug' };
-    if ((issue.analysis.bugConfidence ?? 0) < cfg.minBugConfidence) {
-      return { status: 'skipped', reason: `bug confidence ${issue.analysis.bugConfidence} below threshold ${cfg.minBugConfidence}` };
+    const storedIssue = this.store.getIssue(issueNumber);
+    if (!storedIssue) return { status: 'skipped', reason: `issue #${issueNumber} not found in store` };
+    if (storedIssue.state !== 'open') return { status: 'skipped', reason: 'issue is closed' };
+    // Cheap store-only gates first — no point making a GitHub call to refresh
+    // labels if the issue is already done / PR already opened / out of
+    // attempts.
+    if (storedIssue.analysis.doneDetected === true) {
+      return { status: 'skipped', reason: storedIssue.analysis.doneReason ?? 'issue already appears resolved by a merged PR' };
     }
-    if (issue.analysis.doneDetected === true) {
-      return { status: 'skipped', reason: issue.analysis.doneReason ?? 'issue already appears resolved by a merged PR' };
-    }
-    if (issue.analysis.autofixStatus === 'pr-opened') {
+    if (storedIssue.analysis.autofixStatus === 'pr-opened') {
       return { status: 'skipped', reason: 'PR already opened' };
     }
-
-    const attemptsAlready = issue.analysis.autofixAttempts ?? 0;
+    const attemptsAlready = storedIssue.analysis.autofixAttempts ?? 0;
     const maxAttempts = cfg.maxAttemptsPerIssue;
     const remainingAttempts = maxAttempts - attemptsAlready;
     if (remainingAttempts <= 0) {
       return { status: 'skipped', reason: 'max attempts reached (use --retry to reset counter)' };
     }
 
+    // Refresh labels / state / title from GitHub before the bug-signal gate.
+    // Effects applied by other actions (e.g. bug-detector adding the `bug`
+    // label) write to GitHub directly — the local store stays stale until
+    // the next sync. One API call here saves the user a manual sync between
+    // bug-detector and autofix.
+    const issueData = await this.github.getIssueWithComments(issueNumber);
+    const issue = applyLiveOverlay(storedIssue, issueData.issue);
+    if (issue.state !== 'open') return { status: 'skipped', reason: 'issue is closed' };
+    const bugSignal = detectBugSignal(issue, { minConfidence: cfg.minBugConfidence });
+    if (!bugSignal.isBug) return { status: 'skipped', reason: bugSignal.reason };
+
+    opts.onEvent?.(`[#${issueNumber}] proceeding with autofix — ${bugSignal.reason}`);
+
     const repoRoot = resolve(cfg.repoRoot);
     const branch = `${cfg.branchPrefix}${issue.number}`;
-
-    const issueData = await this.github.getIssueWithComments(issueNumber);
 
     // Repo-discovered skills (Phase 1a). Discovery failure must never break
     // autofix — log and continue with no skills (built-in prompts unchanged).
@@ -784,13 +814,21 @@ export class AutofixOrchestrator {
     if (!cfg || !cfg.enabled) return { status: 'skipped', reason: 'autofix disabled in config' };
     if (!cfg.repoRoot) return { status: 'skipped', reason: 'autofix.repoRoot not set' };
 
-    const issue = this.store.getIssue(issueNumber);
-    if (!issue) return { status: 'skipped', reason: `issue #${issueNumber} not found in store` };
-    if (issue.state !== 'open') return { status: 'skipped', reason: 'issue is closed' };
-    if (issue.analysis.issueType !== 'bug') return { status: 'skipped', reason: 'not classified as a bug' };
-    if ((issue.analysis.bugConfidence ?? 0) < cfg.minBugConfidence) {
-      return { status: 'skipped', reason: `bug confidence ${issue.analysis.bugConfidence} below threshold ${cfg.minBugConfidence}` };
+    const storedIssue = this.store.getIssue(issueNumber);
+    if (!storedIssue) return { status: 'skipped', reason: `issue #${issueNumber} not found in store` };
+    // Refresh from GitHub before the gate — same rationale as the legacy
+    // path. The downstream workflow re-fetches what it needs anyway, so
+    // the only marginal cost is this one extra API call.
+    let issue = storedIssue;
+    try {
+      const live = await this.github.getIssueWithComments(issueNumber);
+      issue = applyLiveOverlay(storedIssue, live.issue);
+    } catch (err) {
+      opts.onEvent?.(`[#${issueNumber}] GitHub refresh failed, using cached labels: ${(err as Error).message}`);
     }
+    if (issue.state !== 'open') return { status: 'skipped', reason: 'issue is closed' };
+    const bugSignal = detectBugSignal(issue, { minConfidence: cfg.minBugConfidence });
+    if (!bugSignal.isBug) return { status: 'skipped', reason: bugSignal.reason };
     if (issue.analysis.doneDetected === true) {
       return { status: 'skipped', reason: issue.analysis.doneReason ?? 'issue already appears resolved by a merged PR' };
     }
@@ -801,6 +839,8 @@ export class AutofixOrchestrator {
     if (cfg.maxAttemptsPerIssue - attemptsAlready <= 0) {
       return { status: 'skipped', reason: 'max attempts reached (use --retry to reset counter)' };
     }
+
+    opts.onEvent?.(`[#${issueNumber}] proceeding with autofix — ${bugSignal.reason}`);
 
     const repoRoot = resolve(cfg.repoRoot);
     const branch = `${cfg.branchPrefix}${issue.number}`;

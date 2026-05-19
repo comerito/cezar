@@ -1,10 +1,10 @@
-import Link from 'next/link';
 import { getActiveWorkspace } from '@/lib/workspace';
 import { getSessionUser } from '@/lib/auth';
 import { createSupabaseAdminClient } from '@/lib/supabase/server';
 import { SettingsForm } from './settings-form';
 import { TeamSection } from './team-section';
 import { AutomationSection } from './automation-section';
+import { SettingsTabs, SettingsCard } from './settings-tabs';
 import type { WorkspaceRole } from '@/lib/supabase/types';
 
 async function loadWorkspaceConfig(workspaceId: string): Promise<{
@@ -13,11 +13,12 @@ async function loadWorkspaceConfig(workspaceId: string): Promise<{
   autoTriageEnabled: boolean;
   autofixEnabled: boolean;
   separateCommentPerStep: boolean;
+  actionAutoComment: boolean;
 }> {
   const supabase = createSupabaseAdminClient();
   const { data } = await supabase
     .from('workspaces')
-    .select('config, issue_autofix_mode, auto_triage_enabled, autofix_enabled, separate_comment_per_step')
+    .select('config, issue_autofix_mode, auto_triage_enabled, autofix_enabled, separate_comment_per_step, action_auto_comment')
     .eq('id', workspaceId)
     .single();
   return {
@@ -26,6 +27,7 @@ async function loadWorkspaceConfig(workspaceId: string): Promise<{
     autoTriageEnabled: data?.auto_triage_enabled ?? true,
     autofixEnabled: data?.autofix_enabled ?? false,
     separateCommentPerStep: data?.separate_comment_per_step ?? false,
+    actionAutoComment: data?.action_auto_comment ?? true,
   };
 }
 
@@ -69,74 +71,63 @@ export default async function SettingsPage() {
 
   if (!workspace || !user) {
     return (
-      <div className="px-8 py-6">
-        <header className="mb-6 border-b border-border pb-5">
-          <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
+      <div className="mx-auto max-w-[1080px] px-8 py-6">
+        <header className="mb-6">
+          <h1 className="font-display text-[28px] font-semibold leading-tight tracking-tight text-on-surface">
+            Settings
+          </h1>
         </header>
-        <div className="rounded-lg border border-dashed border-border bg-bg-elevated p-8 text-center text-sm text-fg-muted">
+        <div className="rounded-lg border border-dashed border-outline-variant bg-surface-container-low p-8 text-center text-sm text-on-surface-variant">
           No workspace selected. Create one first.
         </div>
       </div>
     );
   }
 
-  const [{ config, issueAutofixMode, autoTriageEnabled, autofixEnabled, separateCommentPerStep }, members] = await Promise.all([
+  const [{ config, issueAutofixMode, autoTriageEnabled, autofixEnabled, separateCommentPerStep, actionAutoComment }, members] = await Promise.all([
     loadWorkspaceConfig(workspace.id),
     loadMembers(workspace.id),
   ]);
   const isAdmin = workspace.role === 'admin';
 
   return (
-    <div className="px-8 py-6">
-      <header className="mb-8 border-b border-border pb-5">
-        <h1 className="text-2xl font-semibold tracking-tight">Settings</h1>
-        <p className="mt-1 text-sm text-fg-muted">
-          {workspace.name} — {workspace.repoOwner}/{workspace.repoName}
-          {!isAdmin && <span className="ml-2 text-fg-subtle">(read-only — admin required to edit)</span>}
-        </p>
-      </header>
-
-      <div className="space-y-12">
-        <section>
-          <h2 className="mb-4 text-lg font-semibold tracking-tight">Workflows</h2>
-          <Link
-            href="/settings/workflows"
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm text-fg-muted transition-colors hover:border-accent hover:text-fg"
-          >
-            Map skills, agent backends, and models onto pipeline steps →
-          </Link>
-        </section>
-
-        <section>
-          <h2 className="mb-4 text-lg font-semibold tracking-tight">Automation</h2>
+    <SettingsTabs
+      workspace={{
+        name: workspace.name,
+        repoOwner: workspace.repoOwner,
+        repoName: workspace.repoName,
+        role: workspace.role,
+      }}
+      automation={
+        <SettingsCard
+          title="Automation"
+          description="How aggressively Cezar acts on incoming GitHub events. Defaults are safe; turning autofix on lets Cezar open draft PRs without a human in the loop."
+        >
           <AutomationSection
             autoTriageEnabled={autoTriageEnabled}
             autofixEnabled={autofixEnabled}
             separateCommentPerStep={separateCommentPerStep}
+            actionAutoComment={actionAutoComment}
             readOnly={!isAdmin}
           />
-        </section>
-
-        <section>
-          <h2 className="mb-4 text-lg font-semibold tracking-tight">Runners</h2>
-          <Link
-            href="/settings/runners"
-            className="inline-flex items-center gap-2 rounded-lg border border-border bg-bg-elevated px-4 py-3 text-sm text-fg-muted transition-colors hover:border-accent hover:text-fg"
-          >
-            Register self-hosted agent runners (claude-cli / codex-cli) →
-          </Link>
-        </section>
-
-        <section>
-          <h2 className="mb-4 text-lg font-semibold tracking-tight">Team</h2>
+        </SettingsCard>
+      }
+      team={
+        <SettingsCard
+          title="Team"
+          description="Workspace members and their roles. Only admins can invite, remove, or change roles."
+        >
           <TeamSection members={members} isAdmin={isAdmin} currentUserId={user.id} />
-        </section>
-
-        <section>
-          <h2 className="mb-4 text-lg font-semibold tracking-tight">Configuration</h2>
+        </SettingsCard>
+      }
+      configuration={
+        <SettingsCard
+          title="Configuration"
+          description="Low-level autofix knobs — sync cadence, model selection, attempt budgets. Most workspaces leave the defaults alone."
+        >
           <SettingsForm config={config} issueAutofixMode={issueAutofixMode} readOnly={!isAdmin} />
-        </section>
-      </div>
-    </div>
+        </SettingsCard>
+      }
+    />
   );
 }

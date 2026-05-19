@@ -1,0 +1,108 @@
+import { ANALYZER_SYSTEM_PROMPT, RootCauseSchema, NoActionNeededSchema, AnalyzerResultSchema } from './analyzer.js';
+import { FIXER_SYSTEM_PROMPT, FixReportSchema } from './fixer.js';
+import { REVIEWER_SYSTEM_PROMPT, ReviewVerdictSchema } from './reviewer.js';
+import { AGENT_EXECUTION_GUIDANCE } from './agent-guidance.js';
+
+/**
+ * Phase B unified autofix system prompt — one system message playing
+ * the four classical roles in sequence inside a single persistent
+ * `claude` session.
+ *
+ * See docs/REFACTOR-PLAN-persistent-autofix-session.md §3-§4.
+ *
+ * The user drives phase transitions by sending `## PHASE: <NAME>` user
+ * messages over stream-json stdin. The model is told to wait for those
+ * markers — it must not advance to the next role on its own.
+ *
+ * Q5 (token telemetry) snapshots usage at each phase boundary; Q6
+ * (schema mismatch policy) makes per-phase JSON validation warn-only.
+ * Both are implemented by the runner, not the model — this prompt just
+ * tells it what the expected shapes are.
+ */
+export const UNIFIED_AUTOFIX_SYSTEM_PROMPT = `You are the Cezar AUTOFIX agent. Across this conversation you will play four roles in sequence.
+
+## How phase transitions work
+
+The user will mark the start of each phase with a single line beginning with "## PHASE: <NAME>". When you see one:
+
+  1. Switch to that role.
+  2. Use only the tools appropriate for that role (verify and analyzer are read-only; fixer may edit; reviewer is read-only).
+  3. End your turn with a single JSON object matching that phase's schema (below) — no markdown fences, no prose before or after.
+  4. STOP. Do not begin the next phase on your own. Wait for the user's next "## PHASE:" marker.
+
+The four phases, in order: VERIFY-IN-REPO → ANALYZER → FIXER → REVIEWER. The user may also send a "## PHASE: RETRY-FIXER" with prior reviewer notes if the first fix attempt failed review.
+
+## Phase 1: VERIFY-IN-REPO
+
+${verifyBody()}
+
+## Phase 2: ANALYZER
+
+${ANALYZER_SYSTEM_PROMPT.replace(/^You are the ANALYZER agent\.[^\n]*\n+/i, '').replace(new RegExp(escape(AGENT_EXECUTION_GUIDANCE) + '$'), '').trim()}
+
+## Phase 3: FIXER
+
+${FIXER_SYSTEM_PROMPT.replace(/^You are the FIXER agent\.[^\n]*\n+/i, '').replace(new RegExp(escape(AGENT_EXECUTION_GUIDANCE) + '$'), '').trim()}
+
+## Phase 4: REVIEWER
+
+${REVIEWER_SYSTEM_PROMPT.replace(/^You are the REVIEWER agent\.[^\n]*\n+/i, '').replace(new RegExp(escape(AGENT_EXECUTION_GUIDANCE) + '$'), '').trim()}
+
+${AGENT_EXECUTION_GUIDANCE}`;
+
+/**
+ * Schemas keyed by phase name. The persistent-session runner uses these
+ * for the warn-only validation in §7 Q6 — schema mismatches emit a
+ * `note` event but never halt the run.
+ */
+export const PHASE_SCHEMAS = {
+  'verify-in-repo': null, // verify schema lives in the workflow def; not exported here
+  'analyzer': AnalyzerResultSchema,
+  'fixer': FixReportSchema,
+  'reviewer': ReviewVerdictSchema,
+} as const;
+
+/** The four canonical phase markers, in order. */
+export const PHASES = ['verify-in-repo', 'analyzer', 'fixer', 'reviewer'] as const;
+export type PhaseName = typeof PHASES[number];
+
+/** Format a user-facing phase marker the model recognises. */
+export function phaseMarker(phase: PhaseName, payload: string): string {
+  return `## PHASE: ${phase.toUpperCase()}\n\n${payload}`;
+}
+
+// ─────────────────────────────────────────────────────────────────────
+// helpers — exported so tests can poke at them
+// ─────────────────────────────────────────────────────────────────────
+
+function verifyBody(): string {
+  // VERIFY's prompt lives inline in autofix.workflow.ts today; copy the
+  // body verbatim so the unified prompt stays semantically identical.
+  return `Confirm the reported issue is a *real, still-unfixed defect* — as opposed to expected behavior, an issue that is already fixed on this branch, or something that is not actually a bug.
+
+RULES:
+- You have READ-ONLY tools (Read, Grep, Glob, and read-only Bash like \`git log\`, \`git diff\`, \`git show\`, \`git status\`).
+- Do NOT edit any files.
+- Be quick: this is a triage gate, not a full root-cause analysis. Stop as soon as you can defend a yes/no.
+- Look for: a recent commit that already fixed it; a test that already covers it; documented/intentional behavior; an environment/usage error on the reporter's side.
+
+OUTPUT — output ONLY a single JSON object (no markdown fences, no prose):
+{
+  "isRealUnfixedDefect": true | false,
+  "reason": "one short paragraph. Cite commit hashes, file paths, or test names as evidence.",
+  "confidence": 0.0 to 1.0
+}`;
+}
+
+function escape(s: string): string {
+  return s.replace(/[.*+?^${}()|[\]\\]/g, '\\$&');
+}
+
+// Re-exports for convenience.
+export {
+  RootCauseSchema,
+  NoActionNeededSchema,
+  AnalyzerResultSchema,
+  FixReportSchema,
+  ReviewVerdictSchema,
+};

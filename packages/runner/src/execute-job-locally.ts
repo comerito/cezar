@@ -153,19 +153,15 @@ export async function executeJobLocally(
         },
       };
     } else {
-      // triage — repo-less workflow.
-      if (job.issueNumber == null) throw new Error('triage job has no issue_number');
-      const wf = await core.runWorkflow(core.triageWorkflow, {
-        store, config, github, issueNumber: job.issueNumber, apply: true,
-        bindings: config.workflow?.bindings, settings: config.workflow?.settings,
-        onEvent, onAgentEvent: undefined, onRunRecord, pauseRequested, cancelRequested,
-      });
-      tokensUsed += wf.tokensUsed;
-      const status: Result['status'] =
-        wf.status === 'succeeded' ? 'succeeded' : wf.status === 'paused' ? 'paused' : wf.status === 'cancelled' ? 'cancelled' : 'failed';
+      // TODO(2b3+): wire the data-driven `runTriagePass` for the self-hosted
+      // runner. Triage is repo-less and rare on self-hosted runners; until the
+      // CLI/runner is rewritten on the new action model, skip the job so the
+      // SaaS doesn't keep handing it back.
+      const reason = 'triage on self-hosted runners is not supported yet — re-run from the GUI or wait for 2b3';
+      onEvent(`[runner] ${reason}`);
       result = {
-        status,
-        finalize: { status, outcome: { status: wf.status, reason: wf.reason }, reason: wf.reason ?? null, tokensUsed },
+        status: 'succeeded',
+        finalize: { status: 'skipped', outcome: { status: 'skipped', reason }, reason, tokensUsed },
       };
     }
 

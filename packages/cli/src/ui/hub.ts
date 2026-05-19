@@ -1,25 +1,25 @@
-import { select, confirm, Separator } from '@inquirer/prompts';
+import { select, input, confirm } from '@inquirer/prompts';
 import chalk from 'chalk';
 import { clearScreen, renderLogo } from './logo.js';
 import { renderStatusBox } from './status.js';
 import { runSetupWizard } from './setup.js';
-import { actionRegistry } from '@cezar/core';
-import type { ActionDefinition, ActionGroup } from '@cezar/core';
 import { IssueStore } from '@cezar/core';
-import type { Config } from '@cezar/core';
+import type { ActionDef, Config } from '@cezar/core';
 import { syncCommand } from '../commands/sync.js';
-import { runPipeline } from '../pipeline.js';
+import {
+  loadActionCatalog,
+  runActionAcrossIssues,
+  type IssueScope,
+} from '../utils/cli-action-runner.js';
 
 export async function launchHub(store: IssueStore | null, config: Config): Promise<void> {
-  // First launch — run setup wizard if no store exists
   if (!store) {
     clearScreen();
     renderLogo();
     store = await runSetupWizard(config);
-    if (!store) return; // wizard failed or user cancelled
+    if (!store) return;
   }
 
-  // Populate config from store metadata (owner/repo may not be in config file)
   const meta = store.getMeta();
   if (!config.github.owner) config.github.owner = meta.owner;
   if (!config.github.repo) config.github.repo = meta.repo;
@@ -29,122 +29,100 @@ export async function launchHub(store: IssueStore | null, config: Config): Promi
     renderLogo();
     renderStatusBox(store);
 
-    const choices = buildChoices(store, config);
-
-    const selected = await select({
+    const choice = await select({
       message: 'What would you like to do?',
-      choices,
-      pageSize: 10,
+      choices: [
+        { name: '▶  Run an action', value: 'run' },
+        { name: '🔄  Sync with GitHub', value: 'sync' },
+        { name: '✕   Exit', value: 'exit' },
+      ],
     });
 
-    if (selected === 'exit') return;
+    if (choice === 'exit') return;
 
-    if (selected === 'pipeline') {
-      if (!store) {
-        console.error(chalk.red("Store not found. Run 'cezar init' first."));
-        continue;
-      }
-      await runPipeline(store, config);
-      // Reload store after pipeline to pick up new data
-      store = await IssueStore.loadOrNull(config.store.path);
-      continue;
-    }
-
-    if (selected === 'sync') {
+    if (choice === 'sync') {
       await syncCommand({}, config);
-      // Reload store after sync to pick up new data
-      store = await IssueStore.loadOrNull(config.store.path);
+      const reloaded = await IssueStore.loadOrNull(config.store.path);
+      if (!reloaded) return;
+      store = reloaded;
       continue;
     }
 
-    // selected is an action id — look it up and run it
-    if (!store) {
-      console.error(chalk.red("Store not found. Run 'cezar init' first."));
-      continue;
-    }
-
-    const action = actionRegistry.get(selected);
-    if (!action) continue;
-
-    // If action has no new work, offer to re-evaluate from scratch
-    const badge = action.getBadge(store);
-    const hasWork = /\d/.test(badge);
-
-    if (!hasWork) {
-      const rerun = await confirm({
-        message: `${action.label} is up to date. Re-evaluate all issues from scratch?`,
-        default: false,
-      });
-      if (!rerun) continue;
-      await action.run({ store, config, interactive: true, options: { recheck: true } });
-    } else {
-      await action.run({ store, config, interactive: true, options: {} });
+    if (choice === 'run') {
+      await runActionFlow(config);
+      console.log(chalk.dim('\n  Press Enter to continue.'));
+      await input({ message: '' }).catch(() => '');
     }
   }
 }
 
-interface SelectChoice {
-  name: string;
-  value: string;
-  disabled?: string | boolean;
-}
-
-const GROUP_ORDER: ActionGroup[] = ['triage', 'intelligence', 'release', 'community'];
-
-function buildChoices(
-  store: IssueStore | null,
-  config: Config,
-): Array<SelectChoice | Separator> {
-  const actions = actionRegistry.getAll();
-
-  // Group actions by their group property
-  const grouped = new Map<ActionGroup, ActionDefinition[]>();
-  for (const action of actions) {
-    const group = action.group;
-    if (!grouped.has(group)) grouped.set(group, []);
-    grouped.get(group)!.push(action);
+async function runActionFlow(config: Config): Promise<void> {
+  const catalog = await loadActionCatalog();
+  if (catalog.length === 0) {
+    console.log(chalk.yellow('  No actions available.'));
+    return;
   }
 
-  const actionChoices: Array<SelectChoice | Separator> = [];
-
-  for (const group of GROUP_ORDER) {
-    const groupActions = grouped.get(group);
-    if (!groupActions || groupActions.length === 0) continue;
-
-    if (actionChoices.length > 0) {
-      actionChoices.push(new Separator());
-    }
-
-    for (const action of groupActions) {
-      if (!store) {
-        actionChoices.push({
-          name: formatActionChoice(action, null),
-          value: action.id,
-          disabled: 'Run init first',
-        });
-      } else {
-        const availability = action.isAvailable(store);
-        actionChoices.push({
-          name: formatActionChoice(action, store),
-          value: action.id,
-          disabled: availability === true ? false : availability,
-        });
-      }
+  const byTarget = groupByTarget(catalog);
+  const choices: Array<{ name: string; value: string }> = [];
+  for (const target of ['issue', 'pr'] as const) {
+    const actions = byTarget.get(target) ?? [];
+    if (actions.length === 0) continue;
+    choices.push({ name: chalk.dim(`── ${target} ──`), value: `__heading_${target}` });
+    for (const a of actions) {
+      const desc = a.description ? chalk.dim(` — ${a.description}`) : '';
+      choices.push({ name: `${a.name}${desc}`, value: a.name });
     }
   }
+  choices.push({ name: chalk.dim('← Back'), value: '__back' });
 
-  return [
-    ...actionChoices,
-    new Separator(),
-    { name: '🚀  Run Full Pipeline', value: 'pipeline' },
-    { name: '🔄  Sync with GitHub', value: 'sync' },
-    new Separator(),
-    { name: '✕   Exit', value: 'exit' },
-  ];
+  const actionName = await select({
+    message: 'Pick an action',
+    choices,
+    pageSize: 18,
+  });
+  if (actionName === '__back' || actionName.startsWith('__heading_')) return;
+  const action = catalog.find((a) => a.name === actionName);
+  if (!action) return;
+
+  const scopeKind = await select<'unanalyzed' | 'all' | 'single' | '__back'>({
+    message: 'Scope',
+    choices: [
+      { name: 'Unanalyzed only', value: 'unanalyzed' },
+      { name: 'All issues', value: 'all' },
+      { name: 'Single issue by number', value: 'single' },
+      { name: chalk.dim('← Back'), value: '__back' },
+    ],
+  });
+  if (scopeKind === '__back') return;
+
+  let scope: IssueScope;
+  if (scopeKind === 'single') {
+    const n = await input({
+      message: 'Issue number',
+      validate: (v) => /^\d+$/.test(v.trim()) || 'Enter a positive integer',
+    });
+    scope = { kind: 'single', number: parseInt(n.trim(), 10) };
+  } else if (scopeKind === 'all') {
+    scope = { kind: 'all' };
+  } else {
+    scope = { kind: 'unanalyzed' };
+  }
+
+  const apply = await confirm({
+    message: 'Apply effects to GitHub? (No = dry-run, prints what would happen.)',
+    default: false,
+  });
+
+  await runActionAcrossIssues(action, { scope, apply, dryRun: !apply }, config);
 }
 
-function formatActionChoice(action: ActionDefinition, store: IssueStore | null): string {
-  const badge = store ? action.getBadge(store) : '';
-  const padding = ' '.repeat(Math.max(0, 30 - action.label.length));
-  return `${action.icon}  ${action.label}${padding}${badge ? chalk.dim(badge) : ''}`;
+function groupByTarget(catalog: ActionDef[]): Map<'issue' | 'pr', ActionDef[]> {
+  const out = new Map<'issue' | 'pr', ActionDef[]>();
+  for (const a of catalog) {
+    const list = out.get(a.target) ?? [];
+    list.push(a);
+    out.set(a.target, list);
+  }
+  return out;
 }

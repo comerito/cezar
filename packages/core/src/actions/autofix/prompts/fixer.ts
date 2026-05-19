@@ -1,6 +1,7 @@
 import { z } from 'zod';
 import type { RootCause } from './analyzer.js';
 import { FIX_IMPLEMENTATION_SKILL } from '../skills.js';
+import { AGENT_EXECUTION_GUIDANCE } from './agent-guidance.js';
 
 export const FixReportSchema = z.object({
   changedFiles: z.array(z.string()),
@@ -30,7 +31,7 @@ OUTPUT — when done, output ONLY a single JSON object (no markdown fences) matc
   "approach": "2-4 sentences describing what you changed and why",
   "testCommandsRun": ["npm run typecheck", "..."],
   "remainingConcerns": ["optional list of anything flaky or unaddressed"]
-}`;
+}${AGENT_EXECUTION_GUIDANCE}`;
 
 export function buildFixerUserPrompt(opts: {
   issueNumber: number;

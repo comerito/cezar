@@ -35,6 +35,7 @@ export async function saveAutomationToggles(
       auto_triage_enabled: bool('autoTriageEnabled'),
       autofix_enabled: bool('autofixEnabled'),
       separate_comment_per_step: bool('separateCommentPerStep'),
+      action_auto_comment: bool('actionAutoComment'),
     })
     .eq('id', workspace.id);
   if (error) return { error: error.message };

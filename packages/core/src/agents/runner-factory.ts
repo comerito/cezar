@@ -27,6 +27,20 @@ export function createAgentRunner(
   backend: AgentBackend = DEFAULT_AGENT_BACKEND,
   opts: CreateAgentRunnerOptions = {},
 ): AgentRunner {
+  // Unified-mode backend lock — per docs/REFACTOR-PLAN-persistent-autofix-session.md
+  // §7 Q4, unified single-session runs are CLI-only because the Claude
+  // Agent SDK doesn't expose stream-json stdin semantics. Reject early
+  // with an actionable message rather than failing further down.
+  const mode = opts.config?.autofix?.runner?.mode;
+  if (mode === 'unified' && backend !== 'claude-cli') {
+    throw new Error(
+      `autofix.runner.mode='unified' requires backend='claude-cli' but got '${backend}'. ` +
+        `Either switch this workspace to the claude-cli backend or set autofix.runner.mode='staged'.`,
+    );
+  }
+
+  const transport = opts.config?.autofix?.runner?.transport ?? 'print';
+
   switch (backend) {
     case 'anthropic-api':
       return new AnthropicApiRunner();
@@ -36,6 +50,7 @@ export function createAgentRunner(
         bin: opts.bin,
         timeoutMs: opts.timeoutMs,
         usdPerMillionTokens: opts.usdPerMillionTokens,
+        transport,
       });
     case 'codex-cli':
       return new CodexCliRunner({ spawnFn: opts.spawnFn, bin: opts.bin, timeoutMs: opts.timeoutMs });

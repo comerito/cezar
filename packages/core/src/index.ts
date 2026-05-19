@@ -46,6 +46,7 @@ export {
   formatAuditComment,
   withAuditFooter,
   postAuditComment,
+  type AuditFooterMeta,
 } from './services/audit.js';
 
 // Utils
@@ -62,44 +63,6 @@ export type {
   PreflightSummary,
   RootCausePrompt,
 } from './ports/confirmation.port.js';
-
-// Actions infrastructure
-export type {
-  ActionDefinition,
-  ActionContext,
-  ActionGroup,
-} from './actions/action.interface.js';
-export { actionRegistry } from './actions/registry.js';
-
-// Action runners + prompts
-export * from './actions/auto-label/runner.js';
-export * from './actions/auto-label/prompt.js';
-export * from './actions/bug-detector/runner.js';
-export * from './actions/bug-detector/prompt.js';
-export * from './actions/categorize/runner.js';
-export * from './actions/categorize/prompt.js';
-export * from './actions/claim-detector/runner.js';
-export * from './actions/claim-detector/patterns.js';
-export * from './actions/contributor-welcome/runner.js';
-export * from './actions/contributor-welcome/prompt.js';
-export * from './actions/done-detector/runner.js';
-export * from './actions/done-detector/prompt.js';
-export * from './actions/duplicates/runner.js';
-export * from './actions/duplicates/prompt.js';
-export * from './actions/good-first-issue/runner.js';
-export * from './actions/good-first-issue/prompt.js';
-export * from './actions/missing-info/runner.js';
-export * from './actions/missing-info/prompt.js';
-export * from './actions/priority/runner.js';
-export * from './actions/priority/prompt.js';
-export * from './actions/quality/runner.js';
-export * from './actions/quality/prompt.js';
-export * from './actions/recurring-questions/runner.js';
-export * from './actions/recurring-questions/prompt.js';
-export * from './actions/security/runner.js';
-export * from './actions/security/prompt.js';
-export * from './actions/stale/runner.js';
-export * from './actions/stale/prompt.js';
 
 // Agent runner abstraction (Phase 0). `AgentEvent` here is the legacy
 // `event.port.ts` shape (kept for the CLI/GUI); the normalized runner event
@@ -133,18 +96,56 @@ export * from './actions/autofix/prompts/fixer.js';
 export * from './actions/autofix/prompts/reviewer.js';
 export * from './actions/autofix/ci-attribution.js';
 
-// Skills (Phase 1a) — repo-discovered `.ai/skills/**/*.md` catalog.
+// Skills (Phase 1a) — merged built-in + repo `.ai/skills/**/*.md` catalog.
 export {
   discoverSkills,
+  discoverBuiltinSkills,
   skillsForStage,
   type Skill,
 } from './skills/skill-catalog.js';
+
+// Data-driven actions runtime — system prompt + skill_refs + effects/tools.
+// Lands alongside the legacy actions/* plugin tree; the cutover happens in
+// the next commit (seed defaults + workflow engine reroute + legacy delete).
+export {
+  runAction,
+  EFFECT_REGISTRY,
+  ALL_EFFECT_NAMES,
+  executeEffect,
+  effectsAsAnthropicTools,
+  loadActionByName,
+  loadAutoTriageAction,
+  listEnabledActions,
+  DEFAULT_ACTIONS,
+  runTriagePass,
+  buildAutoCommentBody,
+  actionAlreadyCommented,
+  type ActionDef,
+  type ActionTrigger,
+  type ActionRunResult,
+  type ActionTarget,
+  type RunActionDeps,
+  type EffectDef,
+  type EffectCall,
+  type EffectContext,
+  type EffectName,
+  type AcceptanceMode,
+  type AutoConfidenceConfig,
+  type HitlConfidenceConfig,
+  type ConfidenceConfig,
+  type DeferredEffect,
+  type DeferSink,
+  type TriagePassOptions,
+  type TriagePassActionResult,
+  type TriagePassResult,
+  type TriagePassDeferSink,
+  type BuildAutoCommentArgs,
+} from './actions-v2/index.js';
 
 // Workflow bindings (Phase 1a) — the binding model + resolution chain.
 export {
   resolveStepConfig,
   AUTOFIX_STEP_IDS,
-  BUILTIN_TRIAGE_STEP_IDS,
   DEFAULT_WORKSPACE_WORKFLOW_SETTINGS,
   type WorkflowBinding,
   type WorkflowStepId,
@@ -195,16 +196,3 @@ export {
   type CiFollowupBlackboard,
   type CiFollowupSeed,
 } from './workflows/definitions/ci-followup.workflow.js';
-export {
-  triageWorkflow,
-  RouteDecisionSchema,
-  triageOutcomeFromBlackboard,
-  type TriageBlackboard,
-  type RouteDecision,
-  type TriageOutcome,
-  type TriageIssueType,
-  type TriagePriority,
-} from './workflows/definitions/triage.workflow.js';
-
-// Pipeline
-export * from './pipeline/index.js';

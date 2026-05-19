@@ -64,11 +64,15 @@ export interface Database {
           auto_triage_enabled: boolean;
           autofix_enabled: boolean;
           separate_comment_per_step: boolean;
+          action_auto_comment: boolean;
+          auto_triage_action_id: string | null;
           created_at: string;
           updated_at: string;
         };
-        Insert: Omit<Database['public']['Tables']['workspaces']['Row'], 'id' | 'created_at' | 'updated_at'> & {
+        Insert: Omit<Database['public']['Tables']['workspaces']['Row'], 'id' | 'created_at' | 'updated_at' | 'auto_triage_action_id' | 'action_auto_comment'> & {
           id?: string;
+          auto_triage_action_id?: string | null;
+          action_auto_comment?: boolean;
           created_at?: string;
           updated_at?: string;
         };
@@ -108,6 +112,36 @@ export interface Database {
         };
         Insert: Omit<Database['public']['Tables']['issues']['Row'], 'id'> & { id?: string };
         Update: Partial<Database['public']['Tables']['issues']['Insert']>;
+      };
+      pull_requests: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          number: number;
+          title: string;
+          body: string;
+          state: 'open' | 'closed';
+          draft: boolean;
+          labels: string[];
+          author: string;
+          html_url: string;
+          head_sha: string | null;
+          head_ref: string | null;
+          base_ref: string | null;
+          pr_created_at: string | null;
+          pr_updated_at: string | null;
+          created_at: string;
+          updated_at: string;
+        };
+        Insert: Omit<
+          Database['public']['Tables']['pull_requests']['Row'],
+          'id' | 'created_at' | 'updated_at'
+        > & {
+          id?: string;
+          created_at?: string;
+          updated_at?: string;
+        };
+        Update: Partial<Database['public']['Tables']['pull_requests']['Insert']>;
       };
       user_github_tokens: {
         Row: {
@@ -160,6 +194,85 @@ export interface Database {
           fetched_at?: string;
         };
         Update: Partial<Database['public']['Tables']['repo_skills']['Insert']>;
+      };
+      actions: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          name: string;
+          kind: 'built-in' | 'user';
+          description: string | null;
+          system_prompt: string;
+          skill_refs: Json;
+          target: 'issue' | 'pr';
+          triggers: Json;
+          effects: Json | null;
+          output_schema: Json | null;
+          enabled: boolean;
+          replaces_built_in: string | null;
+          created_at: string;
+          updated_at: string;
+          created_by: string | null;
+          updated_by: string | null;
+          model: string;
+          acceptance_mode: 'auto' | 'human-in-the-loop';
+          confidence_config: Json;
+        };
+        Insert: Omit<Database['public']['Tables']['actions']['Row'],
+          'id' | 'kind' | 'description' | 'system_prompt' | 'skill_refs' | 'triggers' |
+          'effects' | 'output_schema' | 'enabled' | 'replaces_built_in' | 'created_at' | 'updated_at' |
+          'created_by' | 'updated_by' | 'model' | 'acceptance_mode' | 'confidence_config'
+        > & {
+          id?: string;
+          kind?: 'built-in' | 'user';
+          description?: string | null;
+          system_prompt?: string;
+          skill_refs?: Json;
+          triggers?: Json;
+          effects?: Json | null;
+          output_schema?: Json | null;
+          enabled?: boolean;
+          replaces_built_in?: string | null;
+          created_at?: string;
+          updated_at?: string;
+          created_by?: string | null;
+          updated_by?: string | null;
+          model?: string;
+          acceptance_mode?: 'auto' | 'human-in-the-loop';
+          confidence_config?: Json;
+        };
+        Update: Partial<Database['public']['Tables']['actions']['Insert']>;
+      };
+      skill_overrides: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          skill_name: string;
+          body: string;
+          execution_mode: string;
+          triggers: Json;
+          outputs: Json;
+          capabilities: Json;
+          enabled: boolean;
+          created_at: string;
+          updated_at: string;
+          created_by: string | null;
+          updated_by: string | null;
+        };
+        Insert: Omit<Database['public']['Tables']['skill_overrides']['Row'], 'id' | 'body' | 'execution_mode' | 'triggers' | 'outputs' | 'capabilities' | 'enabled' | 'created_at' | 'updated_at' | 'created_by' | 'updated_by'> & {
+          id?: string;
+          body?: string;
+          execution_mode?: string;
+          triggers?: Json;
+          outputs?: Json;
+          capabilities?: Json;
+          enabled?: boolean;
+          created_at?: string;
+          updated_at?: string;
+          created_by?: string | null;
+          updated_by?: string | null;
+        };
+        Update: Partial<Database['public']['Tables']['skill_overrides']['Insert']>;
       };
       jobs: {
         Row: {
@@ -335,6 +448,53 @@ export interface Database {
           updated_at?: string;
         };
         Update: Partial<Database['public']['Tables']['runners']['Insert']>;
+      };
+      pending_decisions: {
+        Row: {
+          id: string;
+          workspace_id: string;
+          action_id: string;
+          workflow_run_id: string | null;
+          agent_run_id: string | null;
+          target_kind: 'issue' | 'pr';
+          issue_number: number | null;
+          pr_number: number | null;
+          target_title: string;
+          effect: string;
+          effect_args: Json;
+          summary: string;
+          confidence: number;
+          status: 'pending' | 'accepted' | 'dismissed' | 'expired';
+          created_at: string;
+          decided_at: string | null;
+          decided_by: string | null;
+          decided_reason: string | null;
+          apply_error: string | null;
+          expires_at: string | null;
+        };
+        Insert: {
+          id?: string;
+          workspace_id: string;
+          action_id: string;
+          workflow_run_id?: string | null;
+          agent_run_id?: string | null;
+          target_kind: 'issue' | 'pr';
+          issue_number?: number | null;
+          pr_number?: number | null;
+          target_title: string;
+          effect: string;
+          effect_args?: Json;
+          summary: string;
+          confidence: number;
+          status?: 'pending' | 'accepted' | 'dismissed' | 'expired';
+          created_at?: string;
+          decided_at?: string | null;
+          decided_by?: string | null;
+          decided_reason?: string | null;
+          apply_error?: string | null;
+          expires_at?: string | null;
+        };
+        Update: Partial<Database['public']['Tables']['pending_decisions']['Insert']>;
       };
     };
   };

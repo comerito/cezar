@@ -1,57 +1,41 @@
 import chalk from 'chalk';
 import type { Config } from '@cezar/core';
-import { IssueStore } from '@cezar/core';
-import { actionRegistry } from '@cezar/core';
+import {
+  loadActionCatalog,
+  runActionAcrossIssues,
+  type IssueScope,
+} from '../utils/cli-action-runner.js';
 
 interface RunOptions {
-  state?: string;
-  recheck?: boolean;
+  all?: boolean;
+  unanalyzed?: boolean;
+  issue?: number;
   apply?: boolean;
   dryRun?: boolean;
-  format?: string;
-  interactive?: boolean;
-  description?: string;
-  issue?: number;
-  maxIssues?: number;
-  retry?: boolean;
 }
 
-export async function runCommand(actionId: string, opts: RunOptions, config: Config): Promise<void> {
-  const store = await IssueStore.loadOrNull(config.store.path);
-  if (!store) {
-    console.error(chalk.red("Store not found. Run 'cezar init' first."));
-    process.exit(1);
-  }
-
-  const action = actionRegistry.get(actionId);
+export async function runCommand(actionName: string, opts: RunOptions, config: Config): Promise<void> {
+  const catalog = await loadActionCatalog();
+  const action = catalog.find((a) => a.name === actionName);
   if (!action) {
-    const available = actionRegistry.getAll().map(a => a.id).join(', ');
-    console.error(chalk.red(`Unknown action '${actionId}'. Available: ${available || 'none'}`));
+    console.error(chalk.red(`Unknown action: ${actionName}\n`));
+    console.error(chalk.dim('Available actions:'));
+    for (const a of catalog) {
+      console.error(chalk.dim(`  ${a.name.padEnd(22)} ${a.description ?? ''}`));
+    }
     process.exit(1);
   }
 
-  const availability = action.isAvailable(store);
-  if (availability !== true) {
-    console.error(chalk.red(`Cannot run '${actionId}': ${availability}`));
-    process.exit(1);
-  }
+  const scope: IssueScope = opts.issue != null
+    ? { kind: 'single', number: opts.issue }
+    : opts.all
+      ? { kind: 'all' }
+      : { kind: 'unanalyzed' };
 
-  const interactive = opts.interactive !== false && process.stdout.isTTY === true;
-
-  await action.run({
-    store,
+  const result = await runActionAcrossIssues(
+    action,
+    { scope, apply: opts.apply === true, dryRun: opts.dryRun === true },
     config,
-    interactive,
-    options: {
-      state: opts.state ?? 'open',
-      recheck: opts.recheck ?? false,
-      apply: opts.apply ?? false,
-      dryRun: opts.dryRun ?? false,
-      format: opts.format ?? 'table',
-      description: opts.description,
-      issue: opts.issue,
-      maxIssues: opts.maxIssues,
-      retry: opts.retry ?? false,
-    },
-  });
+  );
+  if (result.failed > 0) process.exit(1);
 }

@@ -1,6 +1,8 @@
 'use client';
 
 import { useActionState } from 'react';
+import { cn } from '@/components/ui/cn';
+import { TrashIcon } from '@/components/icons';
 import { inviteMember, changeMemberRole, removeMember, type TeamActionState } from './team-actions';
 import type { WorkspaceRole } from '@/lib/supabase/types';
 
@@ -23,91 +25,170 @@ export function TeamSection({ members, isAdmin, currentUserId }: TeamSectionProp
 
   return (
     <div className="space-y-6">
-      <div className="overflow-hidden rounded-lg border border-border">
-        <table className="w-full text-sm">
-          <thead className="bg-bg-subtle text-left text-xs uppercase tracking-wider text-fg-subtle">
+      {/* Members table */}
+      <div className="overflow-hidden rounded-md border border-outline-variant">
+        <table className="min-w-full text-sm">
+          <thead className="bg-surface-container">
             <tr>
-              <th className="px-4 py-3">Member</th>
-              <th className="px-4 py-3">Role</th>
-              {isAdmin && <th className="px-4 py-3">Actions</th>}
+              <Th>Member</Th>
+              <Th>Role</Th>
+              {isAdmin && <Th className="text-right">Actions</Th>}
             </tr>
           </thead>
-          <tbody className="divide-y divide-border">
-            {members.map((m) => (
-              <tr key={m.userId} className="bg-bg">
-                <td className="px-4 py-3">
-                  <div className="flex items-center gap-2">
-                    {m.avatarUrl && <img src={m.avatarUrl} alt="" className="h-6 w-6 rounded-full" />}
-                    <div>
-                      <div className="text-xs font-medium text-fg">{m.name}</div>
-                      <div className="text-xs text-fg-subtle">{m.email}</div>
+          <tbody>
+            {members.map((m, idx) => (
+              <tr
+                key={m.userId}
+                className={cn(
+                  'transition-colors hover:bg-surface-container/60',
+                  idx > 0 && 'border-t border-outline-variant/60',
+                )}
+              >
+                <td className="px-4 py-3 align-middle">
+                  <div className="flex items-center gap-3">
+                    {m.avatarUrl ? (
+                      <img src={m.avatarUrl} alt="" className="h-8 w-8 rounded-md object-cover" />
+                    ) : (
+                      <div className="flex h-8 w-8 items-center justify-center rounded-md bg-primary-container text-xs font-semibold text-primary-on-container">
+                        {initialsOf(m.name || m.email)}
+                      </div>
+                    )}
+                    <div className="min-w-0">
+                      <div className="truncate text-sm font-medium text-on-surface">{m.name}</div>
+                      <div className="truncate text-xs text-on-surface-variant">{m.email}</div>
                     </div>
                   </div>
                 </td>
-                <td className="px-4 py-3">
+                <td className="px-4 py-3 align-middle">
                   {isAdmin && m.userId !== currentUserId ? (
                     <select
                       value={m.role}
                       onChange={(e) => changeMemberRole(m.userId, e.target.value as WorkspaceRole)}
-                      className="rounded border border-border bg-bg px-2 py-1 text-xs text-fg"
+                      className="h-8 rounded-md border border-outline-variant bg-surface px-2 text-xs text-on-surface focus:border-primary focus:outline-none"
                     >
                       <option value="admin">admin</option>
                       <option value="actor">actor</option>
                       <option value="viewer">viewer</option>
                     </select>
                   ) : (
-                    <span className="text-xs text-fg-muted">{m.role}{m.userId === currentUserId ? ' (you)' : ''}</span>
+                    <RoleChip role={m.role}>
+                      {m.role}
+                      {m.userId === currentUserId && <span className="ml-1 text-outline">· you</span>}
+                    </RoleChip>
                   )}
                 </td>
                 {isAdmin && (
-                  <td className="px-4 py-3">
+                  <td className="px-4 py-3 text-right align-middle">
                     {m.userId !== currentUserId && (
                       <button
                         onClick={() => removeMember(m.userId)}
-                        className="text-xs text-danger hover:underline"
+                        className="inline-flex h-7 w-7 items-center justify-center rounded-md border border-outline-variant text-on-surface-variant transition-colors hover:border-error/40 hover:text-error"
+                        title="Remove member"
+                        aria-label={`Remove ${m.name || m.email}`}
                       >
-                        Remove
+                        <TrashIcon className="h-4 w-4" />
                       </button>
                     )}
                   </td>
                 )}
               </tr>
             ))}
+            {members.length === 0 && (
+              <tr>
+                <td colSpan={isAdmin ? 3 : 2} className="px-4 py-6 text-center text-sm text-on-surface-variant">
+                  No members yet.
+                </td>
+              </tr>
+            )}
           </tbody>
         </table>
       </div>
 
+      {/* Invite form */}
       {isAdmin && (
-        <form action={inviteAction} className="flex items-end gap-3">
-          <div>
-            <label className="mb-1 block text-xs text-fg-muted">Invite by email</label>
-            <input
-              name="email"
-              type="email"
-              placeholder="user@example.com"
-              required
-              className="rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg placeholder:text-fg-subtle focus:border-accent focus:outline-none"
-            />
+        <form action={inviteAction} className="rounded-md border border-outline-variant bg-surface-container/40 p-4">
+          <div className="mb-3 font-display text-[11px] font-semibold uppercase tracking-[0.05em] text-on-surface-variant">
+            Invite a member
           </div>
-          <div>
-            <label className="mb-1 block text-xs text-fg-muted">Role</label>
-            <select name="role" className="rounded-md border border-border bg-bg px-3 py-1.5 text-sm text-fg">
-              <option value="actor">actor</option>
-              <option value="admin">admin</option>
-              <option value="viewer">viewer</option>
-            </select>
+          <div className="flex flex-wrap items-end gap-3">
+            <div className="min-w-[220px] flex-1">
+              <label htmlFor="invite-email" className="mb-1 block text-xs text-on-surface-variant">
+                Email
+              </label>
+              <input
+                id="invite-email"
+                name="email"
+                type="email"
+                placeholder="user@example.com"
+                required
+                className="h-9 w-full rounded-md border border-outline-variant bg-surface px-3 text-sm text-on-surface placeholder:text-outline focus:border-primary focus:outline-none"
+              />
+            </div>
+            <div>
+              <label htmlFor="invite-role" className="mb-1 block text-xs text-on-surface-variant">
+                Role
+              </label>
+              <select
+                id="invite-role"
+                name="role"
+                className="h-9 rounded-md border border-outline-variant bg-surface px-3 text-sm text-on-surface focus:border-primary focus:outline-none"
+              >
+                <option value="actor">actor</option>
+                <option value="admin">admin</option>
+                <option value="viewer">viewer</option>
+              </select>
+            </div>
+            <button
+              type="submit"
+              disabled={invitePending}
+              className="inline-flex h-9 items-center rounded-md bg-primary px-4 text-sm font-semibold text-primary-on transition-colors hover:bg-primary-container hover:text-on-surface disabled:cursor-not-allowed disabled:opacity-50"
+            >
+              {invitePending ? 'Inviting…' : 'Invite'}
+            </button>
+            <div className="ml-auto flex items-center gap-2 text-xs">
+              {inviteState.ok && <span className="text-primary">Invited</span>}
+              {inviteState.error && <span className="text-error">{inviteState.error}</span>}
+            </div>
           </div>
-          <button
-            type="submit"
-            disabled={invitePending}
-            className="rounded-md bg-accent px-3 py-1.5 text-sm font-medium text-bg hover:bg-accent-hover disabled:opacity-50"
-          >
-            {invitePending ? 'Inviting...' : 'Invite'}
-          </button>
-          {inviteState.ok && <span className="text-xs text-accent">Invited</span>}
-          {inviteState.error && <span className="text-xs text-danger">{inviteState.error}</span>}
         </form>
       )}
     </div>
   );
+}
+
+function Th({ children, className }: { children: React.ReactNode; className?: string }) {
+  return (
+    <th
+      className={cn(
+        'whitespace-nowrap px-4 py-3 text-left font-display text-[11px] font-semibold uppercase tracking-[0.05em] text-on-surface-variant',
+        className,
+      )}
+    >
+      {children}
+    </th>
+  );
+}
+
+function RoleChip({ role, children }: { role: WorkspaceRole; children: React.ReactNode }) {
+  const tone =
+    role === 'admin'
+      ? 'border-primary/30 bg-primary/10 text-primary'
+      : role === 'actor'
+        ? 'border-tertiary/30 bg-tertiary/10 text-tertiary'
+        : 'border-outline-variant bg-surface-container text-on-surface-variant';
+  return (
+    <span className={cn('inline-flex items-center rounded-md border px-2 py-0.5 font-mono text-[11px]', tone)}>
+      {children}
+    </span>
+  );
+}
+
+function initialsOf(s: string): string {
+  return s
+    .split(/[\s@.]+/)
+    .map((p) => p[0])
+    .filter(Boolean)
+    .slice(0, 2)
+    .join('')
+    .toUpperCase();
 }

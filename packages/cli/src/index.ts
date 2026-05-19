@@ -3,7 +3,6 @@ import 'dotenv/config';
 import { Command } from 'commander';
 import chalk from 'chalk';
 import { loadConfig, IssueStore } from '@cezar/core';
-import { runPipeline } from './pipeline.js';
 import { initCommand } from './commands/init.js';
 import { syncCommand } from './commands/sync.js';
 import { statusCommand } from './commands/status.js';
@@ -11,23 +10,6 @@ import { runCommand } from './commands/run.js';
 import { runsCommand } from './commands/runs.js';
 import { launchHub } from './ui/hub.js';
 import { VERSION } from './utils/version.js';
-
-// Register all actions (side-effect imports)
-import './actions/duplicates/index.js';
-import './actions/missing-info/index.js';
-import './actions/auto-label/index.js';
-import './actions/recurring-questions/index.js';
-import './actions/priority/index.js';
-import './actions/good-first-issue/index.js';
-import './actions/security/index.js';
-import './actions/stale/index.js';
-import './actions/contributor-welcome/index.js';
-import './actions/quality/index.js';
-import './actions/done-detector/index.js';
-import './actions/claim-detector/index.js';
-import './actions/categorize/index.js';
-import './actions/bug-detector/index.js';
-import './actions/autofix/index.js';
 
 const program = new Command()
   .name('cezar')
@@ -70,19 +52,15 @@ program.command('status')
   });
 
 program.command('run <action>')
-  .description('Run an analysis action')
-  .option('--state <state>', 'open|closed|all', 'open')
-  .option('--recheck', 'Re-analyze already-analyzed issues')
-  .option('--apply', 'Apply results to GitHub immediately')
-  .option('--dry-run', 'Show what would happen without writing')
-  .option('--format <format>', 'table|json|markdown', 'table')
-  .option('--no-interactive', 'Force non-interactive mode')
-  .option('--issue <n>', 'Target a single issue number (for autofix)', v => parseInt(v, 10))
-  .option('--max-issues <n>', 'Limit how many issues to process (for autofix)', v => parseInt(v, 10))
-  .option('--retry', 'Reset attempt counter before running (autofix): lets a previously-exhausted issue be re-tried')
-  .action(async (actionId, opts) => {
+  .description('Run a data-driven Action against issues in the local store')
+  .option('--all', 'Run against every issue in the store')
+  .option('--unanalyzed', 'Run only against issues without prior analysis for this action (default)')
+  .option('--issue <n>', 'Target a single issue number', v => parseInt(v, 10))
+  .option('--apply', 'Apply effects to GitHub (default is dry-run)')
+  .option('--dry-run', 'Force dry-run; never write to GitHub')
+  .action(async (actionName, opts) => {
     const config = await loadConfig();
-    await runCommand(actionId, opts, config);
+    await runCommand(actionName, opts, config);
   });
 
 program.command('runs [id]')
@@ -90,31 +68,6 @@ program.command('runs [id]')
   .action(async (id) => {
     const config = await loadConfig();
     await runsCommand(id, config);
-  });
-
-program.command('pipeline')
-  .description('Run full pipeline: close-detection, enrichment, optional autofix')
-  .option('--recheck', 'Re-analyze already-analyzed issues')
-  .option('--dry-run', 'Show what would happen without writing')
-  .option('--no-interactive', 'Force non-interactive mode')
-  .option('--autofix', 'Include Phase 3 (autofix) — opens draft PRs for detected bugs')
-  .option('--apply', 'Required alongside --autofix to actually push branches and open PRs')
-  .option('--max-issues <n>', 'Limit autofix to N issues this run', v => parseInt(v, 10))
-  .action(async (opts) => {
-    const config = await loadConfig();
-    const store = await IssueStore.loadOrNull(config.store.path);
-    if (!store) {
-      console.error(chalk.red("Store not found. Run 'cezar init' first."));
-      process.exit(1);
-    }
-    await runPipeline(store, config, {
-      recheck: opts.recheck ?? false,
-      dryRun: opts.dryRun ?? false,
-      interactive: opts.interactive !== false && process.stdout.isTTY === true,
-      autofix: opts.autofix === true,
-      apply: opts.apply === true,
-      maxIssues: typeof opts.maxIssues === 'number' ? opts.maxIssues : undefined,
-    });
   });
 
 // No subcommand → launch interactive hub

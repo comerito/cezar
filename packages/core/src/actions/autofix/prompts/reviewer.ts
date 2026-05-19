@@ -2,6 +2,7 @@ import { z } from 'zod';
 import type { RootCause } from './analyzer.js';
 import type { FixReport } from './fixer.js';
 import { CODE_REVIEW_SKILL } from '../skills.js';
+import { AGENT_EXECUTION_GUIDANCE } from './agent-guidance.js';
 
 export const ReviewIssueSchema = z.object({
   severity: z.enum(['blocker', 'major', 'minor', 'nit']),
@@ -158,7 +159,7 @@ Required JSON shape:
     { "severity": "blocker|major|minor|nit", "file": "...", "line": 42, "comment": "..." }
   ],
   "suggestions": ["optional improvements that are not required to ship"]
-}`;
+}${AGENT_EXECUTION_GUIDANCE}`;
 
 export function buildReviewerUserPrompt(opts: {
   issueNumber: number;
